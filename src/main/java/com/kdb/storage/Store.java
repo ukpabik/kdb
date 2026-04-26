@@ -20,7 +20,7 @@ public interface Store<K, V> {
     /**
      * Returns the value of a specified key.
      *
-     * @throws IllegalArgumentException if a null key has been passed in
+     * @throws NullPointerException if a null key has been passed in
      *
      * @since 1.0
      */
@@ -29,18 +29,19 @@ public interface Store<K, V> {
     /**
      * Places the specified value (or updates if exists) at a specified key.
      *
-     * @throws IllegalArgumentException if a null key or value has been passed in
+     * @throws NullPointerException if a null key or value has been passed in
      *
      * @since 1.0
      */
     void put(K key, V value);
 
     /**
-     * Deletes a specified key from the Store.
+     * Deletes a specified key from the Store and returns the previous
+     * value of that key (or an empty optional if non-existing).
      *
-     * @throws IllegalArgumentException if a null key has been passed in
+     * @throws NullPointerException if a null key has been passed in
      *
      * @since 1.0
      */
-    boolean delete(K key);
+    Optional<V> delete(K key);
 }

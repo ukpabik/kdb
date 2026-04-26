@@ -32,13 +32,14 @@ KDB requires a performant, thread-safe in-memory key-value store capable of hand
 **Contracts:** Key and Value must never be null.
 
 * `Optional<byte[]> get(ByteBuffer key)`
-    * Returns a value (or empty byte array) if found at a specific key. This should return an `Optional.ofNullable` object. (Handles null value case).
+    * Returns a value (or empty Optional object) if found at a specific key. This should return an `Optional.ofNullable` object. (Handles null value case).
     * If the key is null, we throw an `IllegalArgumentException`.
 * `void put(ByteBuffer key, byte[] value)`
     * Places a value at a specific given key.
     * If the key or value is null, we throw an `IllegalArgumentException`.
-* `boolean delete(ByteBuffer key)`
-    * Returns a boolean (`true` or `false`) depicting the result of deletion.
+* `Optional<byte[]> delete(ByteBuffer key)`
+    * Removes the mapping for a specified key (or does nothing if key doesn't exist).
+    * Returns the previous value of the key mapping (or nothing if doesn't exist or value is null).
 
 ---
 

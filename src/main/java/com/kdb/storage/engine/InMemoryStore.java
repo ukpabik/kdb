@@ -3,6 +3,7 @@ package com.kdb.storage.engine;
 import com.kdb.storage.Store;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -12,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>This implementation uses a {@link ConcurrentHashMap} to provide O(1)
  * average time complexity for all operations while ensuring thread safety
- * through efficient locking mechanisms.
+ * through segment-based locking.
  *
  * <p><b>Constraints:</b>
  * <ul>
@@ -37,8 +38,9 @@ final class InMemoryStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public Optional<byte[]> get(ByteBuffer key) {
-        // TODO: Unimplemented
-        return Optional.empty();
+        Objects.requireNonNull(key);
+
+        return Optional.ofNullable(map.get(key));
     }
 
     /**
@@ -46,15 +48,18 @@ final class InMemoryStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public void put(ByteBuffer key, byte[] value) {
-        // TODO: Unimplemented
+        Objects.requireNonNull(key);
+        Objects.requireNonNull(value);
+
+        map.put(key, value);
     }
 
     /**
      * @since 1.0
      */
     @Override
-    public boolean delete(ByteBuffer key) {
+    public Optional<byte[]> delete(ByteBuffer key) {
         // TODO: Unimplemented
-        return false;
+        return Optional.empty();
     }
 }
