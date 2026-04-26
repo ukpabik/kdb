@@ -1,4 +1,4 @@
-# KDB (Kelechi’s Database)
+# KDB 
 ## Design Doc #1 – Thread-Safe In-Memory Key Value Store
 
 **Abstract:**
@@ -33,13 +33,14 @@ KDB requires a performant, thread-safe in-memory key-value store capable of hand
 
 * `Optional<byte[]> get(ByteBuffer key)`
     * Returns a value (or empty Optional object) if found at a specific key. This should return an `Optional.ofNullable` object. (Handles null value case).
-    * If the key is null, we throw an `IllegalArgumentException`.
+    * If the key is null, we throw an `NullPointerException`.
 * `void put(ByteBuffer key, byte[] value)`
     * Places a value at a specific given key.
-    * If the key or value is null, we throw an `IllegalArgumentException`.
+    * If the key or value is null, we throw an `NullPointerException`.
 * `Optional<byte[]> delete(ByteBuffer key)`
     * Removes the mapping for a specified key (or does nothing if key doesn't exist).
     * Returns the previous value of the key mapping (or nothing if doesn't exist or value is null).
+    * If the key is null, we throw an `NullPointerException`.
 
 ---
 
@@ -47,7 +48,7 @@ KDB requires a performant, thread-safe in-memory key-value store capable of hand
 *Note: Include all tradeoffs with pros and cons.*
 
 ### Tradeoff #1: Opting for `ConcurrentHashMap` vs `HashMap`
-* **Reason:** `ConcurrentHashMap` is a thread-safe version of the `HashMap` collection found in the Java util package. `ConcurrentHashMap` uses locking mechanisms under the hood to provide atomic operations, preventing any `ConcurrentModificationException`s.
+* **Reason:** `ConcurrentHashMap` is a thread-safe version of the `HashMap` collection found in the Java util package. `ConcurrentHashMap` uses locking mechanisms under the hood to provide atomic operations, preventing a `ConcurrentModificationException`.
 * **Other alternatives:**
     * `ConcurrentSkipListMap`: Thread-safe `TreeMap` implementation. This alternative could be considered if we choose to leverage the sorted nature of this data structure. For now, this is not needed.
 
@@ -66,8 +67,9 @@ KDB requires a performant, thread-safe in-memory key-value store capable of hand
 
 ### Scalability
 * CPU overhead is strictly bound by our 50-byte key limit, ensuring hash computation remains consistently low.
-* **Key and Value Constraints:** * Key: 50 byte maximum
-    * Value: 1 MB maximum
+* **Key and Value Constraints:**
+  * Key: 50 byte maximum
+  * Value: 1 MB maximum
 * Handles concurrent read and write access.
 
 ---
