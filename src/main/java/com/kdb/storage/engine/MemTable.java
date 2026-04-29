@@ -5,15 +5,15 @@ import com.kdb.storage.Store;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * A high-performance, thread-safe implementation of {@link Store} that
  * maintains all data in volatile memory.
  *
- * <p>This implementation uses a {@link ConcurrentHashMap} to provide O(1)
- * average time complexity for all operations while ensuring thread safety
- * through segment-based locking.
+ * <p>This implementation uses a {@link java.util.concurrent.ConcurrentSkipListMap} to provide O(log N)
+ * average time complexity for all operations while ensuring sorted behavior and thread safety
+ * through non-blocking operations.
  *
  * <p><b>Constraints:</b>
  * <ul>
@@ -22,15 +22,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  *
  * @see Store
- * @see StorageEngines#createInMemoryStore()
+ * @see StorageEngines#createMemTable()
  * @since 1.0
  */
-final class InMemoryStore implements Store<ByteBuffer, byte[]> {
+final class MemTable implements Store<ByteBuffer, byte[]> {
 
-    private final ConcurrentHashMap<ByteBuffer, byte[]> map;
+    private final ConcurrentSkipListMap<ByteBuffer, byte[]> map;
 
-    InMemoryStore() {
-        this.map = new ConcurrentHashMap<>();
+    MemTable() {
+        this.map = new ConcurrentSkipListMap<>();
     }
 
     /**
@@ -58,8 +58,9 @@ final class InMemoryStore implements Store<ByteBuffer, byte[]> {
      * @since 1.0
      */
     @Override
-    public Optional<byte[]> delete(ByteBuffer key) {
-        // TODO: Unimplemented
-        return Optional.empty();
+    public Optional<byte[]> remove(ByteBuffer key) {
+        Objects.requireNonNull(key);
+
+        return Optional.ofNullable(map.remove(key));
     }
 }

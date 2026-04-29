@@ -10,16 +10,18 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class InMemoryStoreTest {
+class MemTableTest {
 
     private Store<ByteBuffer, byte[]> store;
 
     @BeforeEach
     void init() {
-       this.store = StorageEngines.createInMemoryStore();
+       this.store = StorageEngines.createMemTable();
     }
 
     @Test
@@ -106,6 +108,38 @@ class InMemoryStoreTest {
     }
 
     @Test
+    void removeForExistingKey() {
+        ByteBuffer key = ByteBuffer.wrap("key1".getBytes());
+        byte[] value1 = "value1".getBytes();
+
+        store.put(key, value1);
+        Optional<byte[]> result1 = store.remove(key);
+
+        assertTrue(result1.isPresent(), "Result is not present.");
+        assertArrayEquals(result1.get(), value1, "Removed value does not equal stored value.");
+    }
+
+    @Test
+    void removeForNonExistingKey() {
+        ByteBuffer key = ByteBuffer.wrap("key1".getBytes());
+        Optional<byte[]> result = store.remove(key);
+
+        assertFalse(result.isPresent(), "First result is present when it should not be.");
+    }
+
+    @Test
+    void removeForNullKey() {
+        ByteBuffer key = ByteBuffer.wrap("key1".getBytes());
+        byte[] value1 = "value1".getBytes();
+
+        store.put(key, value1);
+
+        assertThrows(NullPointerException.class, () -> {
+            store.remove(null);
+        });
+    }
+
+    @Test
     void putConcurrentOperations() throws InterruptedException {
         int threadCount = 10;
         int opsPerThread = 100;
@@ -145,13 +179,13 @@ class InMemoryStoreTest {
     }
 
     @Test
-    void getConcurrentOperationsS() throws InterruptedException {
-        int threadCount = 10;
-        int opsPerThread = 100;
-        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    void getConcurrentOperations() throws InterruptedException {
+        final int threadCount = 10;
+        final int opsPerThread = 100;
+        final ExecutorService executor = Executors.newFixedThreadPool(threadCount);
 
-        ByteBuffer sharedKey = ByteBuffer.wrap("shared_key".getBytes());
-        byte[] originalValue = "value".getBytes();
+        final ByteBuffer sharedKey = ByteBuffer.wrap("shared_key".getBytes());
+        final byte[] originalValue = "value".getBytes();
         store.put(sharedKey, originalValue);
 
         // Submit to executors
@@ -169,5 +203,39 @@ class InMemoryStoreTest {
 
         executor.shutdown();
         assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void removeConcurrentOperations() throws InterruptedException {
+        final ByteBuffer sharedKey = ByteBuffer.wrap("concurrency_test_key".getBytes());
+        final byte[] value = "value".getBytes();
+        final int threadCount = 10;
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicInteger successfulDeletions = new AtomicInteger(0);
+        final ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+        store.put(sharedKey, value);
+
+        for (int i = 0; i < threadCount; i++) {
+            executor.submit(() -> {
+                try {
+                    latch.await();
+                    Optional<byte[]> result = store.remove(sharedKey);
+                    if (result.isPresent()) {
+                        successfulDeletions.incrementAndGet();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+            });
+        }
+
+        latch.countDown();
+        executor.shutdown();
+        assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+
+        assertEquals(1, successfulDeletions.get(), "Only one thread should successfully delete the key");
+        assertTrue(store.get(sharedKey).isEmpty(), "Key should be gone after concurrent deletes");
     }
 }

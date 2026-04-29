@@ -5,7 +5,7 @@ import java.util.Optional;
 /**
  * A simple implementation of a key-value store. Entries are typically
  * inserted with {@link #put(Object, Object)} and retrieved with
- * {@link #get(Object)}. Entries are removed through {@link #delete(Object)}.
+ * {@link #get(Object)}. Entries are removed through {@link #remove(Object)}.
  *
  * <p>Implementations of this interface are expected to be thread-safe, and
  * able to be accessed by multiple threads.</p>
@@ -43,5 +43,5 @@ public interface Store<K, V> {
      *
      * @since 1.0
      */
-    Optional<V> delete(K key);
+    Optional<V> remove(K key);
 }
