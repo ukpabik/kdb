@@ -49,7 +49,6 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
     @Override
     public void put(ByteBuffer key, byte[] value) {
         Objects.requireNonNull(key);
-        Objects.requireNonNull(value);
 
         map.put(key, value);
     }

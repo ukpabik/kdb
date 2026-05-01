@@ -11,7 +11,7 @@ import java.util.Optional;
  * able to be accessed by multiple threads.</p>
  *
  * @param <K> the type of the store's keys, which cannot be null
- * @param <V> the type of the store's values, which cannot be null
+ * @param <V> the type of the store's values, which can be null
  *
  * @since 1.0
  */
@@ -29,7 +29,7 @@ public interface Store<K, V> {
     /**
      * Places the specified value (or updates if exists) at a specified key.
      *
-     * @throws NullPointerException if a null key or value has been passed in
+     * @throws NullPointerException if a null key has been passed in
      *
      * @since 1.0
      */

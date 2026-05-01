@@ -2,7 +2,9 @@ package com.kdb.storage.engine;
 
 import com.kdb.storage.Store;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
 
 /**
  * A factory class for creating instances of Store types. A typical
@@ -29,5 +31,17 @@ public final class StorageEngines {
      */
     public static Store<ByteBuffer, byte[]> createMemTable() {
         return new MemTable();
+    }
+
+    /**
+     * Creates and returns a new thread-safe, persistent {@link Store}.
+     * <p>This implementation is backed by an LSM-tree structure
+     * optimized for high-throughput writes.</p>
+     *
+     * @return a new instance of a persistent Store
+     * @see PersistentStore
+     */
+    public static Store<ByteBuffer, byte[]> createPersistentStore(Path logDirectory) throws IOException {
+        return new PersistentStore(logDirectory);
     }
 }
