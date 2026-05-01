@@ -2,12 +2,10 @@ package com.kdb.storage.persistence;
 
 import com.kdb.storage.common.OpCode;
 
-import java.io.BufferedInputStream;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.function.BiConsumer;
@@ -29,6 +27,9 @@ public final class WriteAheadLog {
     private final Path filePath;
     private final FileChannel channel;
 
+    private final int OPCODE_LENGTH = 1;
+    private final int SIZE_BUFFER_LENGTH = 4;
+
     public WriteAheadLog(Path filePath) throws IOException {
         this.filePath = filePath;
         this.channel = FileChannel.open(filePath,
@@ -37,12 +38,20 @@ public final class WriteAheadLog {
                 StandardOpenOption.APPEND);
     }
 
+    /**
+     * Appends an operation to the log file.
+     *
+     * @param opCode defines the operation type based on {@link OpCode}
+     * @param key defines the key being used in the operation
+     * @param value defines the value being used in the operation
+     * @throws IOException thrown in case of error reading file
+     */
     public void append(OpCode opCode, ByteBuffer key, byte[] value) throws IOException {
         int keySize = key.remaining();
-        int totalSize = 1 + 4 + keySize;
+        int totalSize = OPCODE_LENGTH + SIZE_BUFFER_LENGTH + keySize;
 
         if (opCode.equals(OpCode.PUT)) {
-            totalSize += 4 + value.length;
+            totalSize += SIZE_BUFFER_LENGTH + value.length;
         }
 
         ByteBuffer serialized = ByteBuffer.allocate(totalSize);
@@ -63,8 +72,53 @@ public final class WriteAheadLog {
         channel.force(true);
     }
 
+    /**
+     * Replays all in-memory operations occurred prior to flush.
+     *
+     * <p>Ensures crash recovery for {@link com.kdb.storage.engine.MemTable},
+     * equipping the {@link com.kdb.storage.engine.PersistentStore} efficient data security.</p>
+     *
+     * @param put defines the put method that will be called
+     * @param remove defines the remove method that will be called
+     * @throws IOException throws in the event of a file read error
+     */
     public void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) throws IOException {
-        // TODO: Open the file for reading, read, and perform either put or delete
+
+        try (FileChannel readChannel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+            // header == 5 bytes, opcode + keySize
+            int headerSize = OPCODE_LENGTH + SIZE_BUFFER_LENGTH;
+            ByteBuffer header = ByteBuffer.allocate(headerSize);
+
+            while (readChannel.read(header) != -1) {
+                header.flip();
+                byte opCode = header.get();
+                int keySize = header.getInt();
+
+                ByteBuffer keyBuffer = ByteBuffer.allocate(keySize);
+                readChannel.read(keyBuffer);
+                keyBuffer.flip();
+
+                if (opCode == OpCode.PUT.getCode()) {
+                    ByteBuffer valueSizeBuffer = ByteBuffer.allocate(SIZE_BUFFER_LENGTH);
+                    readChannel.read(valueSizeBuffer);
+                    valueSizeBuffer.flip();
+                    int valueSize = valueSizeBuffer.getInt();
+
+                    ByteBuffer valueBuffer = ByteBuffer.allocate(valueSize);
+                    readChannel.read(valueBuffer);
+                    valueBuffer.flip();
+
+                    put.accept(keyBuffer, valueBuffer.array());
+                } else {
+                    remove.accept(keyBuffer);
+                }
+                header.clear();
+            }
+        } catch (NoSuchFileException _) {
+           // Note: Should only occur on first boot. (log doesn't exist yet)
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read WAL during recovery", e);
+        }
     }
 
     public void clear() {

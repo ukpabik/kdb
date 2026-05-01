@@ -25,6 +25,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     private final Store<ByteBuffer, byte[]> memTable;
     private final WriteAheadLog log;
 
+    private static final byte[] TOMBSTONE = new byte[0];
+
 
     PersistentStore(Path logPath) throws IOException {
         this.memTable = StorageEngines.createMemTable();
@@ -37,7 +39,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     public Optional<byte[]> get(ByteBuffer key) {
         Optional<byte[]> result = memTable.get(key);
 
-        if (result.isPresent() && result.get() == null){
+        if (result.isPresent() && result.get() == TOMBSTONE){
             return Optional.empty();
         }
 
@@ -65,7 +67,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
             Optional<byte[]> previousValue = memTable.get(key);
 
             log.append(OpCode.DELETE, key, null);
-            memTable.put(key, null);
+            memTable.put(key, TOMBSTONE);
             return previousValue;
         } catch (Exception e) {
             throw new RuntimeException("Failed to persist data to WAL", e);
@@ -73,6 +75,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     }
 
     private void recover() throws IOException {
-        // TODO: Unimplemented
+        log.replay(memTable::put, (key) -> {
+          memTable.put(key, TOMBSTONE);
+        });
     }
 }
