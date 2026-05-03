@@ -2,7 +2,9 @@ package com.kdb.storage.engine;
 
 import com.kdb.storage.common.OpCode;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
@@ -24,7 +26,7 @@ import java.util.function.Consumer;
  *
  * @see com.kdb.storage.engine.StorageEngines#createPersistentStore(Path)
  */
-public final class WriteAheadLog {
+public final class WriteAheadLog implements AutoCloseable {
     private final Path filePath;
     private final FileChannel channel;
 
@@ -48,7 +50,7 @@ public final class WriteAheadLog {
      * @param value defines the value being used in the operation
      * @throws IOException thrown in case of error reading file
      */
-    public void append(OpCode opCode, ByteBuffer key, byte[] value) throws IOException {
+    public synchronized void append(OpCode opCode, ByteBuffer key, byte[] value) throws IOException {
         int keySize = key.remaining();
         int totalSize = OPCODE_LENGTH + SIZE_BUFFER_LENGTH + keySize;
 
@@ -84,7 +86,7 @@ public final class WriteAheadLog {
      * @param remove defines the remove method that will be called
      * @throws IOException throws in the event of a file read error
      */
-    public void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) throws IOException {
+    public synchronized void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) throws IOException {
 
         try (FileChannel readChannel = FileChannel.open(filePath, StandardOpenOption.READ)) {
             // header == 5 bytes, opcode + keySize
@@ -97,17 +99,24 @@ public final class WriteAheadLog {
                 int keySize = header.getInt();
 
                 ByteBuffer keyBuffer = ByteBuffer.allocate(keySize);
-                readChannel.read(keyBuffer);
+                while (keyBuffer.hasRemaining()) {
+                    readChannel.read(keyBuffer);
+                }
                 keyBuffer.flip();
 
                 if (opCode == OpCode.PUT.getCode()) {
                     ByteBuffer valueSizeBuffer = ByteBuffer.allocate(SIZE_BUFFER_LENGTH);
-                    readChannel.read(valueSizeBuffer);
+                    while (valueSizeBuffer.hasRemaining()) {
+                        readChannel.read(valueSizeBuffer);
+                    }
                     valueSizeBuffer.flip();
                     int valueSize = valueSizeBuffer.getInt();
 
                     ByteBuffer valueBuffer = ByteBuffer.allocate(valueSize);
-                    readChannel.read(valueBuffer);
+                    while (valueBuffer.hasRemaining()) {
+                        readChannel.read(valueBuffer);
+                    }
+
                     valueBuffer.flip();
 
                     put.accept(keyBuffer, valueBuffer.array());
@@ -123,7 +132,12 @@ public final class WriteAheadLog {
         }
     }
 
-    public void clear() {
-        // TODO: unimplemented
+    public synchronized void clear() throws IOException {
+        channel.truncate(0);
+    }
+
+    @Override
+    public void close() throws Exception {
+        channel.close();
     }
 }
