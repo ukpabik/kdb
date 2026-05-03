@@ -115,7 +115,7 @@ class MemTableTest {
         Optional<byte[]> result1 = store.remove(key);
 
         assertTrue(result1.isPresent(), "Result is not present.");
-        assertArrayEquals(result1.get(), value1, "Removed value does not equal stored value.");
+        assertFalse(store.get(key).isPresent(), "Key should be shadowed by a tombstone.");
     }
 
     @Test
@@ -236,5 +236,18 @@ class MemTableTest {
 
         assertEquals(1, successfulDeletions.get(), "Only one thread should successfully delete the key");
         assertTrue(store.get(sharedKey).isEmpty(), "Key should be gone after concurrent deletes");
+    }
+    @Test
+    void testSizeTracking() {
+        MemTable memTable = (MemTable) store;
+        long initialSize = memTable.getCurrentSizeInBytes();
+
+        ByteBuffer key = ByteBuffer.wrap("key1".getBytes());
+        byte[] value = "value1".getBytes();
+
+        memTable.put(key, value);
+
+        long expectedSize = key.remaining() + value.length + 64; // 64 is your overhead const
+        assertEquals(expectedSize, memTable.getCurrentSizeInBytes() - initialSize);
     }
 }

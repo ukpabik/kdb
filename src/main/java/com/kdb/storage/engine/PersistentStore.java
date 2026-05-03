@@ -3,11 +3,12 @@ package com.kdb.storage.engine;
 
 import com.kdb.storage.Store;
 import com.kdb.storage.common.OpCode;
-import com.kdb.storage.persistence.WriteAheadLog;
+import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -25,12 +26,22 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     private final Store<ByteBuffer, byte[]> memTable;
     private final WriteAheadLog log;
 
-    private static final byte[] TOMBSTONE = new byte[0];
+    // TODO: Implement initialization for this
+//    private final List<SSTable> ssTables;
+
+    static final byte[] TOMBSTONE = new byte[0];
+
+    // 4 MB flush capacity
+    private static final int FLUSH_CAPACITY = 4_000_000;
 
 
     PersistentStore(Path logPath) throws IOException {
+        Objects.requireNonNull(logPath);
         this.memTable = StorageEngines.createMemTable();
         this.log = new WriteAheadLog(logPath.resolve("wal.log"));
+
+
+        // TODO: Load SSTables into the list?
 
         recover();
     }
@@ -54,8 +65,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
             log.append(OpCode.PUT, key, value);
             memTable.put(key, value);
         } catch(Exception e) {
-            // TODO: Create internal error for WAL (StorageException)
-            throw new RuntimeException("Failed to persist data to WAL", e);
+            throw new StorageException("Failed to persist data to WAL", e);
         }
     }
 
@@ -70,7 +80,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
             memTable.put(key, TOMBSTONE);
             return previousValue;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to persist data to WAL", e);
+            throw new StorageException("Failed to persist data to WAL", e);
         }
     }
 
@@ -78,5 +88,9 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         log.replay(memTable::put, (key) -> {
           memTable.put(key, TOMBSTONE);
         });
+    }
+
+    private void loadSSTables() {
+        // TODO: Unimplemented
     }
 }

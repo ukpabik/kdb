@@ -6,6 +6,9 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static com.kdb.storage.engine.PersistentStore.TOMBSTONE;
 
 /**
  * A high-performance, thread-safe implementation of {@link Store} that
@@ -27,10 +30,15 @@ import java.util.concurrent.ConcurrentSkipListMap;
  */
 final class MemTable implements Store<ByteBuffer, byte[]> {
 
+    // Estimate for JVM overhead per map entry.
+    private static final int ESTIMATED_OVERHEAD_BYTES = 64;
+
     private final ConcurrentSkipListMap<ByteBuffer, byte[]> map;
+    private final AtomicLong currentSizeInBytes;
 
     MemTable() {
         this.map = new ConcurrentSkipListMap<>();
+        this.currentSizeInBytes = new AtomicLong(0);
     }
 
     /**
@@ -40,7 +48,12 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
     public Optional<byte[]> get(ByteBuffer key) {
         Objects.requireNonNull(key);
 
-        return Optional.ofNullable(map.get(key));
+        byte[] value = map.get(key);
+        if (value == TOMBSTONE || value == null) {
+            return Optional.empty();
+        }
+
+        return Optional.of(value);
     }
 
     /**
@@ -49,8 +62,17 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
     @Override
     public void put(ByteBuffer key, byte[] value) {
         Objects.requireNonNull(key);
+        Objects.requireNonNull(value);
 
-        map.put(key, value);
+        byte[] oldValue = map.put(key, value);
+
+        long newEntrySize = calculateSize(key, value);
+        if (oldValue != null) {
+            currentSizeInBytes.addAndGet(newEntrySize - calculateSize(key, oldValue));
+        } else {
+            // New entry
+            currentSizeInBytes.addAndGet(newEntrySize);
+        }
     }
 
     /**
@@ -60,6 +82,25 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
     public Optional<byte[]> remove(ByteBuffer key) {
         Objects.requireNonNull(key);
 
-        return Optional.ofNullable(map.remove(key));
+        byte[] oldValue = map.put(key, TOMBSTONE);
+        long tombstoneSize = calculateSize(key, TOMBSTONE);
+
+        if (oldValue != null) {
+            currentSizeInBytes.addAndGet(tombstoneSize - calculateSize(key, oldValue));
+        } else {
+            currentSizeInBytes.addAndGet(tombstoneSize);
+        }
+
+        return (oldValue == null || oldValue == TOMBSTONE)
+                ? Optional.empty()
+                : Optional.of(oldValue);
+        }
+
+    public long getCurrentSizeInBytes() {
+       return this.currentSizeInBytes.get();
+    }
+
+    private long calculateSize(ByteBuffer key, byte[] value) {
+        return key.remaining() + value.length + ESTIMATED_OVERHEAD_BYTES;
     }
 }

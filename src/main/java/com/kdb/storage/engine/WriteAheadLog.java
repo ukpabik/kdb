@@ -1,4 +1,4 @@
-package com.kdb.storage.persistence;
+package com.kdb.storage.engine;
 
 import com.kdb.storage.common.OpCode;
 
@@ -8,6 +8,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -31,6 +32,7 @@ public final class WriteAheadLog {
     private final int SIZE_BUFFER_LENGTH = 4;
 
     public WriteAheadLog(Path filePath) throws IOException {
+        Objects.requireNonNull(filePath);
         this.filePath = filePath;
         this.channel = FileChannel.open(filePath,
                 StandardOpenOption.CREATE,
