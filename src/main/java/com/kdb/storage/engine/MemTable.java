@@ -1,5 +1,6 @@
 package com.kdb.storage.engine;
 
+import com.google.common.collect.ImmutableMap;
 import com.kdb.storage.Store;
 
 import java.nio.ByteBuffer;
@@ -98,6 +99,15 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
 
     public long getCurrentSizeInBytes() {
        return this.currentSizeInBytes.get();
+    }
+
+    ImmutableMap<ByteBuffer, byte[]> immutableCopy() {
+        return ImmutableMap.copyOf(map);
+    }
+
+    void clear() {
+        this.currentSizeInBytes.set(0);
+        this.map.clear();
     }
 
     private long calculateSize(ByteBuffer key, byte[] value) {

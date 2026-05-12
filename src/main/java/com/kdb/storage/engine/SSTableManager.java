@@ -1,14 +1,13 @@
 package com.kdb.storage.engine;
 
-import com.google.common.collect.ImmutableMap;
-
-import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.Map;
 
-final class SSTableReader {
+final class SSTableManager {
 
-    SSTableReader() {
+    private final Path directoryPath;
+    SSTableManager(Path directory) {
+        this.directoryPath = directory;
     }
 
     SSTable load() {

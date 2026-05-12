@@ -1,6 +1,7 @@
 package com.kdb.storage.engine;
 
 
+import com.google.common.collect.ImmutableMap;
 import com.kdb.storage.Store;
 import com.kdb.storage.common.OpCode;
 import com.kdb.storage.exceptions.StorageException;
@@ -25,9 +26,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
 
     private final Store<ByteBuffer, byte[]> memTable;
     private final WriteAheadLog log;
-
-    // TODO: Implement initialization for this
-//    private final List<SSTable> ssTables;
+    private final SSTableManager tableManager;
+    private final SSTableWriter tableWriter;
 
     static final byte[] TOMBSTONE = new byte[0];
 
@@ -35,10 +35,12 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     private static final int FLUSH_CAPACITY = 4_000_000;
 
 
-    PersistentStore(Path logPath) throws IOException {
-        Objects.requireNonNull(logPath);
+    PersistentStore(Path directory) throws IOException {
+        Objects.requireNonNull(directory);
         this.memTable = StorageEngines.createMemTable();
-        this.log = new WriteAheadLog(logPath.resolve("wal.log"));
+        this.log = new WriteAheadLog(directory.resolve("wal.log"));
+        this.tableManager = new SSTableManager(directory);
+        this.tableWriter = new SSTableWriter(directory);
 
 
         // TODO: Load SSTables into the list?
@@ -50,8 +52,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     public Optional<byte[]> get(ByteBuffer key) {
         Optional<byte[]> result = memTable.get(key);
 
-        if (result.isPresent() && result.get() == TOMBSTONE){
-            return Optional.empty();
+        if (result.isPresent()){
+            return result.get() == TOMBSTONE ? Optional.empty() : result;
         }
 
         // TODO: Check SSTables for value
@@ -92,5 +94,16 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
 
     private void loadSSTables() {
         // TODO: Unimplemented
+    }
+
+    private void flush() throws IOException {
+        MemTable table = (MemTable) memTable;
+        ImmutableMap<ByteBuffer, byte[]> immutableMemTable = table.immutableCopy();
+
+        // TODO: Register this to tableManager
+        Path newSSTPath = tableWriter.writeToFile(immutableMemTable);
+
+        table.clear();
+        log.clear();
     }
 }

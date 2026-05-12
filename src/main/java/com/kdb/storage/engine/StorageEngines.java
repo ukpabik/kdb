@@ -41,7 +41,7 @@ public final class StorageEngines {
      * @return a new instance of a persistent Store
      * @see PersistentStore
      */
-    public static Store<ByteBuffer, byte[]> createPersistentStore(Path logDirectory) throws IOException {
-        return new PersistentStore(logDirectory);
+    public static Store<ByteBuffer, byte[]> createPersistentStore(Path directory) throws IOException {
+        return new PersistentStore(directory);
     }
 }

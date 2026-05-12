@@ -2,9 +2,7 @@ package com.kdb.storage.engine;
 
 import com.kdb.storage.common.OpCode;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
@@ -30,9 +28,6 @@ public final class WriteAheadLog implements AutoCloseable {
     private final Path filePath;
     private final FileChannel channel;
 
-    private final int OPCODE_LENGTH = 1;
-    private final int SIZE_BUFFER_LENGTH = 4;
-
     public WriteAheadLog(Path filePath) throws IOException {
         Objects.requireNonNull(filePath);
         this.filePath = filePath;
@@ -52,10 +47,10 @@ public final class WriteAheadLog implements AutoCloseable {
      */
     public synchronized void append(OpCode opCode, ByteBuffer key, byte[] value) throws IOException {
         int keySize = key.remaining();
-        int totalSize = OPCODE_LENGTH + SIZE_BUFFER_LENGTH + keySize;
+        int totalSize = Byte.BYTES + Integer.BYTES + keySize;
 
         if (opCode.equals(OpCode.PUT)) {
-            totalSize += SIZE_BUFFER_LENGTH + value.length;
+            totalSize += Integer.BYTES + value.length;
         }
 
         ByteBuffer serialized = ByteBuffer.allocate(totalSize);
@@ -84,13 +79,13 @@ public final class WriteAheadLog implements AutoCloseable {
      *
      * @param put defines the put method that will be called
      * @param remove defines the remove method that will be called
-     * @throws IOException throws in the event of a file read error
+     * @throws RuntimeException throws in the event of a file read error
      */
-    public synchronized void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) throws IOException {
+    public synchronized void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) {
 
         try (FileChannel readChannel = FileChannel.open(filePath, StandardOpenOption.READ)) {
             // header == 5 bytes, opcode + keySize
-            int headerSize = OPCODE_LENGTH + SIZE_BUFFER_LENGTH;
+            int headerSize = Byte.BYTES + Integer.BYTES;
             ByteBuffer header = ByteBuffer.allocate(headerSize);
 
             while (readChannel.read(header) != -1) {
@@ -105,7 +100,7 @@ public final class WriteAheadLog implements AutoCloseable {
                 keyBuffer.flip();
 
                 if (opCode == OpCode.PUT.getCode()) {
-                    ByteBuffer valueSizeBuffer = ByteBuffer.allocate(SIZE_BUFFER_LENGTH);
+                    ByteBuffer valueSizeBuffer = ByteBuffer.allocate(Integer.BYTES);
                     while (valueSizeBuffer.hasRemaining()) {
                         readChannel.read(valueSizeBuffer);
                     }
