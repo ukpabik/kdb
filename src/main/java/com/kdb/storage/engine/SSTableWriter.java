@@ -11,6 +11,7 @@ import java.util.*;
 
 import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static java.nio.file.StandardOpenOption.APPEND;
+import static java.nio.file.StandardOpenOption.CREATE;
 
 
 /**
@@ -54,7 +55,7 @@ final class SSTableWriter {
     public SSTableWriter(Path directory) {
        this.directoryPath = directory;
     }
-    
+
     /**
      * Persists a snapshot of the MemTable to a newly generated SSTable file.
      * * <p>Generates a random filename, sequentially writes all key-value pairs,
@@ -80,7 +81,7 @@ final class SSTableWriter {
         int counter = 0; // For telling us what key we are on
         Map<ByteBuffer, Long> indexMap = new HashMap<ByteBuffer, Long>();
 
-        try (FileChannel fc = FileChannel.open(filePath, APPEND)) {
+        try (FileChannel fc = FileChannel.open(filePath, CREATE, APPEND)) {
             for (ImmutableMap.Entry<ByteBuffer, byte[]> entry : memTableSnapshot.entrySet()) {
                 ByteBuffer serializedBytes = serialize(entry.getKey(), entry.getValue());
 
