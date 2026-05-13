@@ -32,7 +32,7 @@ class SSTableWriterTest {
                 ByteBuffer.wrap("key2".getBytes()), "value2".getBytes()
         );
 
-        Path sstFile = writer.writeToFile(data);
+        Path sstFile = writer.writeToFile(data, 0);
 
         assertTrue(Files.exists(sstFile), "SSTable file should be created on disk");
         assertTrue(sstFile.toString().endsWith(".sst"), "File must have the .sst extension");
@@ -64,7 +64,7 @@ class SSTableWriterTest {
         }
         ImmutableMap<ByteBuffer, byte[]> data = builder.build();
 
-        Path sstFile = writer.writeToFile(data);
+        Path sstFile = writer.writeToFile(data, 0);
 
         try (FileChannel fc = FileChannel.open(sstFile, StandardOpenOption.READ)) {
             ByteBuffer footer = ByteBuffer.allocate(20);
@@ -83,7 +83,7 @@ class SSTableWriterTest {
     void testWriteToFile_HandlesEmptyMemTable() throws IOException {
         ImmutableMap<ByteBuffer, byte[]> emptyData = ImmutableMap.of();
 
-        Path sstFile = writer.writeToFile(emptyData);
+        Path sstFile = writer.writeToFile(emptyData, 0);
 
         try (FileChannel fc = FileChannel.open(sstFile, StandardOpenOption.READ)) {
             assertEquals(20, fc.size(), "File should only contain the empty 20-byte footer");

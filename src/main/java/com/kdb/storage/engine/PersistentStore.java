@@ -8,10 +8,13 @@ import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 
 /**
  * A high-performance, thread-safe, persistent key value store.
@@ -28,6 +31,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     private final WriteAheadLog log;
     private final SSTableManager tableManager;
     private final SSTableWriter tableWriter;
+    private final AtomicLong sequenceNumber;
 
     static final byte[] TOMBSTONE = new byte[0];
 
@@ -41,7 +45,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         this.log = new WriteAheadLog(directory.resolve("wal.log"));
         this.tableManager = new SSTableManager(directory);
         this.tableWriter = new SSTableWriter(directory);
-
+        this.sequenceNumber = loadSequenceNumber(directory);
 
         // TODO: Load SSTables into the list?
 
@@ -92,18 +96,31 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         });
     }
 
-    private void loadSSTables() {
-        // TODO: Unimplemented
-    }
-
     private void flush() throws IOException {
         MemTable table = (MemTable) memTable;
         ImmutableMap<ByteBuffer, byte[]> immutableMemTable = table.immutableCopy();
 
-        // TODO: Register this to tableManager
-        Path newSSTPath = tableWriter.writeToFile(immutableMemTable);
+        Path newSSTPath = tableWriter.writeToFile(immutableMemTable, sequenceNumber.get());
 
+        tableManager.registerSSTable(newSSTPath);
+        sequenceNumber.incrementAndGet();
         table.clear();
         log.clear();
+    }
+
+    private AtomicLong loadSequenceNumber(Path directory) throws IOException {
+        try (Stream<Path> stream = Files.list(directory)) {
+            long maxSequence = stream
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .filter(name -> name.endsWith(".sst"))
+                    .map(name -> name.replace(".sst", ""))
+                    .filter(name -> name.matches("\\d+"))
+                    .mapToLong(Long::parseLong)
+                    .max()
+                    .orElse(0L);
+
+            return new AtomicLong(maxSequence + 1);
+        }
     }
 }

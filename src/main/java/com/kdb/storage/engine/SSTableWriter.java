@@ -8,6 +8,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static java.nio.file.StandardOpenOption.APPEND;
@@ -40,19 +41,20 @@ final class SSTableWriter {
 
     private static final String SST_FILE_EXT = ".sst";
     private static final int SST_FILENAME_SIZE = 32;
-    private static final int INDEX_BUFFER_LENGTH = 20;
     private final Path directoryPath;
 
     // Index for every 100 keys
     private static final int INDEX_SEGMENT = 100;
     private final Random rand = new Random();
 
+    static final int INDEX_BUFFER_LENGTH = 20;
+
     /**
      * Initializes the SSTableWriter with a target directory for new files.
      *
      * @param directory the directory path where new SSTable files will be generated and stored
      */
-    public SSTableWriter(Path directory) {
+    SSTableWriter(Path directory) {
        this.directoryPath = directory;
     }
 
@@ -66,20 +68,14 @@ final class SSTableWriter {
      * @return the {@link Path} to the newly created SSTable file
      * @throws RuntimeException thrown if an I/O error occurs while creating or writing to the file
      */
-    public synchronized Path writeToFile(ImmutableMap<ByteBuffer, byte[]> memTableSnapshot) {
-        byte[] prefixBuffer = new byte[SST_FILENAME_SIZE];
-        rand.nextBytes(prefixBuffer);
+    public synchronized Path writeToFile(ImmutableMap<ByteBuffer, byte[]> memTableSnapshot, long sequenceNumber) {
+        Objects.requireNonNull(memTableSnapshot);
 
-        StringBuilder builder = new StringBuilder();
-        for (byte b: prefixBuffer) {
-            builder.append(b);
-        }
-
-        String fileName = String.format("%s%s", builder.toString(), SST_FILE_EXT);
+        String fileName = String.format("%05d%s", sequenceNumber, SST_FILE_EXT);
         Path filePath = Path.of(directoryPath.toString(), fileName);
 
         int counter = 0; // For telling us what key we are on
-        Map<ByteBuffer, Long> indexMap = new HashMap<ByteBuffer, Long>();
+        Map<ByteBuffer, Long> indexMap = new HashMap<>();
 
         try (FileChannel fc = FileChannel.open(filePath, CREATE, APPEND)) {
             for (ImmutableMap.Entry<ByteBuffer, byte[]> entry : memTableSnapshot.entrySet()) {
@@ -112,7 +108,7 @@ final class SSTableWriter {
             indexBuffer.flip();
 
             fc.write(indexBuffer);
-
+            fc.force(true);
             return filePath;
         } catch (IOException e) {
             throw new RuntimeException("Failed to write MemTable to file", e);

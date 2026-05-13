@@ -22,4 +22,8 @@ final class SSTable {
         filePath = path;
         sparseIndex = ImmutableMap.copyOf(index);
     }
+
+    Path path() {
+        return this.filePath;
+    }
 }
