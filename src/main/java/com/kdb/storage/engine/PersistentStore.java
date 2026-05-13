@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -47,8 +47,6 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         this.tableWriter = new SSTableWriter(directory);
         this.sequenceNumber = loadSequenceNumber(directory);
 
-        // TODO: Load SSTables into the list?
-
         recover();
     }
 
@@ -57,10 +55,13 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         Optional<byte[]> result = memTable.get(key);
 
         if (result.isPresent()){
-            return result.get() == TOMBSTONE ? Optional.empty() : result;
+            return Arrays.equals(result.get(), TOMBSTONE) ? Optional.empty() : result;
         }
 
-        // TODO: Check SSTables for value
+        result = tableManager.search(key);
+        if (result.isPresent()) {
+            return Arrays.equals(result.get(), TOMBSTONE) ? Optional.empty() : result;
+        }
 
         return result;
     }

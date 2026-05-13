@@ -8,7 +8,6 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -18,18 +17,6 @@ import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
 import static java.nio.file.StandardOpenOption.READ;
 
 final class SSTableManager {
-
-
-    /*
-    TODO: Write functions for loading and searching.
-
-    search(ByteBuffer) --> use binary search leveraging sparse indexes to find key (if not found, return empty)
-
-    DONE: registerSSTable(Path) --> loads the sstable into the list of active sstables
-
-    DONE: load(Path) --> takes a path and creates the SSTable obj by reading for the sparseIndex in the footer
-
-     */
 
     private final Path directoryPath;
     private final List<SSTable> tables;
@@ -42,7 +29,18 @@ final class SSTableManager {
 
 
     Optional<byte[]> search(ByteBuffer key) {
-       return Optional.empty();
+        for (SSTable table : tables) {
+            try {
+                Optional<byte[]> result = table.search(key);
+
+                if (result.isPresent()) {
+                    return result;
+                }
+            } catch (IOException e) {
+                // TODO: Log error
+            }
+        }
+        return Optional.empty();
     }
 
     void registerSSTable(Path sstPath) {
@@ -74,7 +72,7 @@ final class SSTableManager {
     }
 
     private SSTable load(Path sstPath) throws IOException {
-        Map<ByteBuffer, Long> indexMap = new ConcurrentHashMap<>();
+        Map<ByteBuffer, Long> indexMap = new TreeMap<>();
 
         try (FileChannel fc = FileChannel.open(sstPath, READ)) {
             fc.position(fc.size() - INDEX_BUFFER_LENGTH);

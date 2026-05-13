@@ -8,7 +8,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static java.nio.file.StandardOpenOption.APPEND;
@@ -75,7 +74,7 @@ final class SSTableWriter {
         Path filePath = Path.of(directoryPath.toString(), fileName);
 
         int counter = 0; // For telling us what key we are on
-        Map<ByteBuffer, Long> indexMap = new HashMap<>();
+        Map<ByteBuffer, Long> indexMap = new TreeMap<>();
 
         try (FileChannel fc = FileChannel.open(filePath, CREATE, APPEND)) {
             for (ImmutableMap.Entry<ByteBuffer, byte[]> entry : memTableSnapshot.entrySet()) {
