@@ -10,9 +10,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -29,11 +29,15 @@ import java.util.stream.Stream;
  */
 final class PersistentStore implements Store<ByteBuffer, byte[]> {
 
-    private final Store<ByteBuffer, byte[]> memTable;
-    private final WriteAheadLog log;
+    private volatile Store<ByteBuffer, byte[]> activeMemTable;
+    private volatile Store<ByteBuffer, byte[]> inactiveMemTable;
+    private WriteAheadLog activeLog;
     private final SSTableManager tableManager;
     private final SSTableWriter tableWriter;
-    private final AtomicLong sequenceNumber;
+    private final AtomicLong sstSequenceNumber;
+    private final AtomicLong logSequenceNumber;
+    private final Path directory;
+    private final ExecutorService flushService;
 
     static final byte[] TOMBSTONE = new byte[0];
 
@@ -43,13 +47,20 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
 
     PersistentStore(Path directory) throws IOException {
         Objects.requireNonNull(directory);
-        this.memTable = StorageEngines.createMemTable();
-        this.log = new WriteAheadLog(directory.resolve("wal.log"));
+        this.directory = directory;
+        this.sstSequenceNumber = loadSSTSequenceNumber();
+        this.logSequenceNumber = loadLogSequenceNumber();
+
+        this.activeMemTable = StorageEngines.createMemTable();
+        this.activeLog = loadLog();
+
         this.tableManager = new SSTableManager(directory);
         this.tableWriter = new SSTableWriter(directory);
-        this.sequenceNumber = loadSequenceNumber(directory);
+        this.flushService = Executors.newSingleThreadExecutor();
 
         recover();
+        // TODO: Check if we need to perform a flush here.
+        // TODO: Find some way to check if a flush is currently queued. We do not want to start multiple flushes at the same time.
     }
 
     /**
@@ -57,12 +68,19 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public Optional<byte[]> get(ByteBuffer key) {
-        Optional<byte[]> result = memTable.get(key);
+        Optional<byte[]> result = activeMemTable.get(key);
 
-        if (result.isPresent()){
+        if (result.isPresent()) {
             return result.get() == TOMBSTONE ? Optional.empty() : result;
         }
-        
+
+        if (inactiveMemTable != null) {
+            result = inactiveMemTable.get(key);
+            if (result.isPresent()) {
+                return result.get() == TOMBSTONE ? Optional.empty() : result;
+            }
+        }
+
         result = tableManager.search(key);
         if (result.isPresent()) {
             return result.get() == TOMBSTONE ? Optional.empty() : result;
@@ -76,10 +94,16 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public void put(ByteBuffer key, byte[] value) {
+        // TODO: THIS FUNCTION SHOULD ACQUIRE A LOCK TO ENSURE NO CONCURRENT READ ISSUES.
         try {
-            log.append(OpCode.PUT, key, value);
-            memTable.put(key, value);
-        } catch(IOException e) {
+            activeLog.append(OpCode.PUT, key, value);
+            activeMemTable.put(key, value);
+
+            MemTable table = (MemTable) activeMemTable;
+            if (table.getCurrentSizeInBytes() >= FLUSH_CAPACITY) {
+                triggerFlush();
+            }
+        } catch (IOException e) {
             throw new StorageException("Failed to persist data to WAL", e);
         }
     }
@@ -89,13 +113,14 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public Optional<byte[]> remove(ByteBuffer key) {
+        // TODO: THIS SHOULD ACQUIRE A READ LOCK.
         try {
             Objects.requireNonNull(key, "Key cannot be null");
 
-            Optional<byte[]> previousValue = memTable.get(key);
+            Optional<byte[]> previousValue = activeMemTable.get(key);
 
-            log.append(OpCode.DELETE, key, null);
-            memTable.put(key, TOMBSTONE);
+            activeLog.append(OpCode.DELETE, key, null);
+            activeMemTable.put(key, TOMBSTONE);
             return previousValue;
         } catch (IOException e) {
             throw new StorageException("Failed to persist data to WAL", e);
@@ -106,40 +131,99 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      * Recovers the WAL log from disk.
      *
      * @throws IOException in case of file read error
-     * @see WriteAheadLog#replay(BiConsumer, Consumer) 
+     * @see WriteAheadLog#replay(BiConsumer, Consumer)
      */
     private void recover() throws IOException {
-        log.replay(memTable::put, (key) -> {
-          memTable.put(key, TOMBSTONE);
-        });
+        List<Path> logFiles;
+
+        try (Stream<Path> stream = Files.list(this.directory)) {
+            logFiles = stream
+                    .filter(path -> path.toString().endsWith(".log"))
+                    .sorted(Comparator.comparing(Path::getFileName))
+                    .toList();
+        }
+
+        if (logFiles.isEmpty()) {
+            return;
+        }
+
+        // TODO: Add logging
+
+        for (Path logPath : logFiles) {
+            try (WriteAheadLog recoveryLog = new WriteAheadLog(logPath)) {
+                recoveryLog.replay(
+                        activeMemTable::put,
+                        (key) -> activeMemTable.put(key, TOMBSTONE)
+                );
+            }
+        }
     }
 
     /**
      * Writes the current {@link MemTable} to disk, and resets state.
-     * 
+     *
      * @throws IOException in case of file read error
      * @see SSTableWriter#writeToFile(ImmutableMap, long)
      */
-    private void flush() throws IOException {
-        MemTable table = (MemTable) memTable;
-        ImmutableMap<ByteBuffer, byte[]> immutableMemTable = table.immutableCopy();
+    void flush() throws IOException {
+        // TODO: THIS SHOULD ACQUIRE A WRITE LOCK WHILE MOVING TABLES, AND THEN RELEASE IT.
+        MemTable tableToFlush;
+        ImmutableMap<ByteBuffer, byte[]> immutableMemTable;
+        long currentSeqNum;
+        WriteAheadLog oldLog;
 
-        Path newSSTPath = tableWriter.writeToFile(immutableMemTable, sequenceNumber.get());
+        synchronized (this) {
+            while (inactiveMemTable != null) {
+                try {
+                    this.wait();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting for flush to complete", e);
+                }
+            }
 
-        tableManager.registerSSTable(newSSTPath);
-        sequenceNumber.incrementAndGet();
-        table.clear();
-        log.clear();
+            this.inactiveMemTable = this.activeMemTable;
+            this.activeMemTable = StorageEngines.createMemTable();
+
+            tableToFlush = (MemTable) this.inactiveMemTable;
+            immutableMemTable = tableToFlush.immutableCopy();
+
+            currentSeqNum = sstSequenceNumber.getAndIncrement();
+
+            // TODO: Rotate the log instead of clearing
+            oldLog = rotateLog();
+        }
+
+        Path newSSTPath = tableWriter.writeToFile(immutableMemTable, currentSeqNum);
+
+        synchronized (this) {
+            tableManager.registerSSTable(newSSTPath);
+            this.inactiveMemTable = null;
+            deleteLog(oldLog);
+            this.notifyAll();
+        }
     }
 
     /**
-     * Loads the sequence number from disk into memory.
+     * Helper function to trigger a background flush process.
+     */
+    private void triggerFlush() {
+        this.flushService.submit(() -> {
+            try {
+                flush();
+            } catch (IOException e) {
+                // TODO: Log this?
+            }
+        });
+    }
+
+    /**
+     * Loads the SST sequence number from disk into memory.
      *
-     * @param directory the directory where the {@link PersistentStore} is held.
      * @return the sequence number as an {@link AtomicLong}
      * @throws IOException in case of file read error
      */
-    private AtomicLong loadSequenceNumber(Path directory) throws IOException {
+    private AtomicLong loadSSTSequenceNumber() throws IOException {
         try (Stream<Path> stream = Files.list(directory)) {
             long maxSequence = stream
                     .map(Path::getFileName)
@@ -153,5 +237,76 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
 
             return new AtomicLong(maxSequence + 1);
         }
+    }
+
+    /**
+     * Loads the log sequence number from disk into memory.
+     *
+     * @return the sequence number as an {@link AtomicLong}
+     * @throws IOException in case of file read error
+     */
+    private AtomicLong loadLogSequenceNumber() throws IOException {
+        try (Stream<Path> stream = Files.list(this.directory)) {
+            OptionalLong maxSequence = stream
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .filter(name -> name.endsWith(".log"))
+                    .map(name -> name.replace(".log", ""))
+                    .filter(name -> name.matches("\\d+"))
+                    .mapToLong(Long::parseLong)
+                    .max();
+
+            return new AtomicLong(maxSequence.orElse(0L));
+        }
+    }
+
+    /**
+     * Rotates the current log to a new log, and returns the oldLog.
+     *
+     * @return The old log
+     * @throws IOException In the event of a file read error.
+     */
+    private WriteAheadLog rotateLog() throws IOException {
+        long nextSeq = logSequenceNumber.incrementAndGet();
+        String fileName = String.format("%05d.log", nextSeq);
+        Path filePath = directory.resolve(fileName);
+
+        WriteAheadLog oldLog;
+        synchronized (this) {
+            oldLog = this.activeLog;
+
+            this.activeLog = new WriteAheadLog(filePath);
+        }
+
+        return oldLog;
+    }
+
+    /**
+     * Deletes the old log.
+     *
+     * @param oldLog The old log to be deleted.
+     * @throws IOException In the event of a file read error.
+     */
+    private void deleteLog(WriteAheadLog oldLog) throws IOException {
+        if (oldLog != null) {
+            try {
+                oldLog.close();
+                Files.deleteIfExists(oldLog.path());
+            } catch (IOException e) {
+                // TODO: Log this
+            }
+        }
+    }
+
+    /**
+     * Loads the most recent log on disk, or creates a new one if none exist.
+     * @return The most recent active log, or a new log if none exist.
+     * @throws IOException In the event of a file read error.
+     */
+    private WriteAheadLog loadLog() throws IOException {
+        String fileName = String.format("%05d.log", logSequenceNumber.get());
+        Path latestLogPath = directory.resolve(fileName);
+
+        return new WriteAheadLog(latestLogPath);
     }
 }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -61,24 +62,28 @@ class PersistentStoreTest {
     }
 
     @Test
-    void testWriteAheadLogClear(@TempDir Path tempDir) throws Exception {
+    void testLogRotation(@TempDir Path tempDir) throws Exception {
+        PersistentStore store = new PersistentStore(tempDir);
 
-        Path walPath = tempDir.resolve("wal.log");
+        ByteBuffer key = ByteBuffer.wrap("rotation-test".getBytes());
+        byte[] value = "initial-data".getBytes();
+        store.put(key, value);
 
-        try (WriteAheadLog wal = new WriteAheadLog(walPath)) {
-            byte[] value = "value1".getBytes();
-            for (int i = 0; i < 10; i++) {
-                ByteBuffer key = ByteBuffer.wrap(String.valueOf(i).getBytes());
-                wal.append(OpCode.PUT, key, value);
-            }
+        Path log0 = tempDir.resolve("00000.log");
+        assertTrue(Files.exists(log0), "Initial log should exist");
+        long sizeBefore = Files.size(log0);
+        assertTrue(sizeBefore > 0, "Initial log should have data");
 
-            long sizeBefore = java.nio.file.Files.size(walPath);
-            assertTrue(sizeBefore > 0, "WAL should have data before clear");
+        store.flush();
 
-            wal.clear();
+        Path log1 = tempDir.resolve("00001.log");
 
-            long sizeAfter = java.nio.file.Files.size(walPath);
-            assertEquals(0, sizeAfter, "WAL should be empty after clear");
-        }
+        assertFalse(Files.exists(log0), "Old log should be deleted after successful flush");
+
+        assertTrue(Files.exists(log1), "New log should be created after rotation");
+        assertEquals(0, Files.size(log1), "New log should be empty initially");
+
+        store.put(ByteBuffer.wrap("new-key".getBytes()), "new-data".getBytes());
+        assertTrue(Files.size(log1) > 0, "New log should receive new writes");
     }
 }

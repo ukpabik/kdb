@@ -85,6 +85,7 @@ public final class WriteAheadLog implements AutoCloseable {
     public synchronized void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) {
 
         try (FileChannel readChannel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+            readChannel.position(0);
             // header == 5 bytes, opcode + keySize
             int headerSize = Byte.BYTES + Integer.BYTES;
             ByteBuffer header = ByteBuffer.allocate(headerSize);
@@ -128,12 +129,12 @@ public final class WriteAheadLog implements AutoCloseable {
         }
     }
 
-    public synchronized void clear() throws IOException {
-        channel.truncate(0);
+    @Override
+    public void close() throws IOException {
+        channel.close();
     }
 
-    @Override
-    public void close() throws Exception {
-        channel.close();
+    Path path() {
+        return this.filePath;
     }
 }
