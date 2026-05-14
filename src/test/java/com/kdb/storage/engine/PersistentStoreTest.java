@@ -2,6 +2,7 @@ package com.kdb.storage.engine;
 
 import com.kdb.storage.Store;
 import com.kdb.storage.common.OpCode;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,19 +12,32 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PersistentStoreTest {
 
+    private PersistentStore currentStore;
+    @AfterEach
+    void tearDown() {
+        if (currentStore != null) {
+            currentStore.close();
+        }
+    }
+
     @Test
     void testInitialization(@TempDir Path tempDir) throws Exception {
         ByteBuffer key = ByteBuffer.wrap("init_key".getBytes());
         byte[] value = "init_value".getBytes();
-        Store<ByteBuffer, byte[]> store = StorageEngines.createPersistentStore(tempDir);
+        this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
 
-        store.put(key, value);
-        Optional<byte[]> result = store.get(key);
+        currentStore.put(key, value);
+        Optional<byte[]> result = currentStore.get(key);
 
         assertTrue(result.isPresent(), "Store should return the value just inserted");
         assertArrayEquals(value, result.get(), "Returned bytes must match exactly");
@@ -34,9 +48,9 @@ class PersistentStoreTest {
         ByteBuffer key = ByteBuffer.wrap("user_1".getBytes());
         byte[] value = "Alice".getBytes();
 
-        Store<ByteBuffer, byte[]> store = StorageEngines.createPersistentStore(tempDir);
+        this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
 
-        store.put(key, value);
+        this.currentStore.put(key, value);
 
         Store<ByteBuffer, byte[]> store2 = StorageEngines.createPersistentStore(tempDir);
 
@@ -49,12 +63,12 @@ class PersistentStoreTest {
     void testTombstoneValues(@TempDir Path tempDir) throws Exception {
         ByteBuffer key = ByteBuffer.wrap("dead_key".getBytes());
         byte[] value = "To_Be_Deleted".getBytes();
-        Store<ByteBuffer, byte[]> store = StorageEngines.createPersistentStore(tempDir);
+        this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
 
-        store.put(key, value);
-        store.remove(key);
+        currentStore.put(key, value);
+        currentStore.remove(key);
 
-        assertTrue(store.get(key).isEmpty(), "MemTable should immediately hide deleted keys via tombstone");
+        assertTrue(currentStore.get(key).isEmpty(), "MemTable should immediately hide deleted keys via tombstone");
 
         Store<ByteBuffer, byte[]> store2 = new PersistentStore(tempDir);
 
@@ -63,18 +77,18 @@ class PersistentStoreTest {
 
     @Test
     void testLogRotation(@TempDir Path tempDir) throws Exception {
-        PersistentStore store = new PersistentStore(tempDir);
+        this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
 
         ByteBuffer key = ByteBuffer.wrap("rotation-test".getBytes());
         byte[] value = "initial-data".getBytes();
-        store.put(key, value);
+        currentStore.put(key, value);
 
         Path log0 = tempDir.resolve("00000.log");
         assertTrue(Files.exists(log0), "Initial log should exist");
         long sizeBefore = Files.size(log0);
         assertTrue(sizeBefore > 0, "Initial log should have data");
 
-        store.flush();
+        currentStore.flush();
 
         Path log1 = tempDir.resolve("00001.log");
 
@@ -83,7 +97,107 @@ class PersistentStoreTest {
         assertTrue(Files.exists(log1), "New log should be created after rotation");
         assertEquals(0, Files.size(log1), "New log should be empty initially");
 
-        store.put(ByteBuffer.wrap("new-key".getBytes()), "new-data".getBytes());
+        currentStore.put(ByteBuffer.wrap("new-key".getBytes()), "new-data".getBytes());
         assertTrue(Files.size(log1) > 0, "New log should receive new writes");
+    }
+
+    @Test
+    void testConcurrentPuts(@TempDir Path tempDir) throws Exception {
+        this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
+        int threadCount = 20;
+        int insertsPerThread = 1000;
+        int totalInserts = threadCount * insertsPerThread;
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+
+        for (int i = 0; i < threadCount; i++) {
+            final int threadId = i;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+                    for (int j = 0; j < insertsPerThread; j++) {
+                        String keyStr = "key-" + threadId + "-" + j;
+                        String valStr = "val-" + threadId + "-" + j;
+                        currentStore.put(ByteBuffer.wrap(keyStr.getBytes()), valStr.getBytes());
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+
+        assertTrue(doneLatch.await(10, TimeUnit.SECONDS), "Concurrent inserts timed out");
+        executor.shutdown();
+
+        int verifiedCount = 0;
+        for (int i = 0; i < threadCount; i++) {
+            for (int j = 0; j < insertsPerThread; j++) {
+                String keyStr = "key-" + i + "-" + j;
+                String expectedValStr = "val-" + i + "-" + j;
+
+                Optional<byte[]> val = currentStore.get(ByteBuffer.wrap(keyStr.getBytes()));
+                assertTrue(val.isPresent(), "Missing key: " + keyStr);
+                assertArrayEquals(expectedValStr.getBytes(), val.get(), "Corrupted value for key: " + keyStr);
+                verifiedCount++;
+            }
+        }
+
+        assertEquals(totalInserts, verifiedCount, "Total verified inserts should match expected");
+    }
+
+    @Test
+    void testFlushDuringConcurrentWrites(@TempDir Path tempDir) throws Exception {
+        this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
+        int threadCount = 10;
+        int insertsPerThread = 500;
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        AtomicInteger successfulInserts = new AtomicInteger(0);
+
+        for (int i = 0; i < threadCount; i++) {
+            final int threadId = i;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+                    for (int j = 0; j < insertsPerThread; j++) {
+                        String keyStr = "concurrent-key-" + threadId + "-" + j;
+                        currentStore.put(ByteBuffer.wrap(keyStr.getBytes()), "val".getBytes());
+                        successfulInserts.incrementAndGet();
+
+                        if (j % 50 == 0) Thread.sleep(1);
+                    }
+                } catch (Exception e) {
+                    // Ignore for test
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+
+        Thread.sleep(50);
+        currentStore.flush();
+
+        assertTrue(doneLatch.await(5, TimeUnit.SECONDS), "Test timed out");
+        executor.shutdown();
+
+        assertEquals(threadCount * insertsPerThread, successfulInserts.get(), "All inserts should have finished");
+
+        assertTrue(Files.exists(tempDir.resolve("00001.log")), "Log should have rotated");
+
+        long sstCount = Files.list(tempDir).filter(p -> p.toString().endsWith(".sst")).count();
+        assertTrue(sstCount > 0, "An SSTable should have been written to disk during the flush");
+
+        assertTrue(currentStore.get(ByteBuffer.wrap("concurrent-key-0-0".getBytes())).isPresent(), "Failed to read early key");
+        assertTrue(currentStore.get(ByteBuffer.wrap("concurrent-key-0-499".getBytes())).isPresent(), "Failed to read late key");
     }
 }

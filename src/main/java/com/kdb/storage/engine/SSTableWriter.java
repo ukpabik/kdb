@@ -78,7 +78,14 @@ final class SSTableWriter {
         Map<ByteBuffer, Long> indexMap = new TreeMap<>();
 
         try (FileChannel fc = FileChannel.open(filePath, CREATE, APPEND)) {
+            boolean isFirstKey = true;
             for (ImmutableMap.Entry<ByteBuffer, byte[]> entry : memTableSnapshot.entrySet()) {
+
+                if (isFirstKey) {
+                    indexMap.put(entry.getKey(), fc.size());
+                    isFirstKey = false;
+                }
+
                 ByteBuffer serializedBytes = serialize(entry.getKey(), entry.getValue());
 
                 counter++;

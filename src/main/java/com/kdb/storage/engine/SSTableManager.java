@@ -44,7 +44,7 @@ final class SSTableManager {
     Optional<byte[]> search(ByteBuffer key) {
         for (SSTable table : tables) {
             try {
-                Optional<byte[]> result = table.search(key);
+                Optional<byte[]> result = table.search(key.duplicate());
 
                 if (result.isPresent()) {
                     return result;
@@ -65,7 +65,7 @@ final class SSTableManager {
     void registerSSTable(Path sstPath) {
         Optional<SSTable> registeredTable = tryLoad(sstPath);
 
-        registeredTable.ifPresent(this.tables::add);
+        registeredTable.ifPresent(this.tables::addFirst);
     }
 
     /**

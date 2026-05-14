@@ -17,8 +17,8 @@ import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
  * A read-only, on-disk data structure providing efficient key-value lookups.
  *
  * <p> The {@code SSTable} (Sorted String Table) stores key-value pairs sorted by key.
- *  To avoid loading the entire file into memory, this class maintains a <b>Sparse Index</b>:
- *  a subset of keys mapped to their byte offsets within the file. </p>
+ * To avoid loading the entire file into memory, this class maintains a <b>Sparse Index</b>:
+ * a subset of keys mapped to their byte offsets within the file. </p>
  *
  * <h3>On-Disk Format:</h3>
  * <pre>
@@ -61,11 +61,7 @@ final class SSTable {
     Optional<byte[]> search(ByteBuffer key) throws IOException {
         Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
 
-        if (indexEntry == null) {
-            return Optional.empty();
-        }
-
-        long offset = indexEntry.getValue();
+        long offset = (indexEntry == null) ? 0L : indexEntry.getValue();
 
         try (FileChannel fc = FileChannel.open(this.filePath, StandardOpenOption.READ)) {
             fc.position(offset);
@@ -83,15 +79,14 @@ final class SSTable {
                 fc.read(valueSize);
                 valueSize.flip();
 
+                int vSize = valueSize.getInt();
                 int compare = key.compareTo(keyBytes);
                 if (compare == 0) {
-                    ByteBuffer valueBytes = ByteBuffer.allocate(valueSize.getInt());
+                    ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
                     fc.read(valueBytes);
-                    valueBytes.flip();
-
                     return Optional.of(valueBytes.array());
                 } else if (compare > 0) {
-                    fc.position(fc.position() + valueSize.getInt());
+                    fc.position(fc.position() + vSize);
                 } else {
                     break;
                 }

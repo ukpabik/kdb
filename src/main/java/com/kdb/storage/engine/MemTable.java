@@ -95,13 +95,13 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
         return (oldValue == null || oldValue == TOMBSTONE)
                 ? Optional.empty()
                 : Optional.of(oldValue);
-        }
+    }
 
     /**
      * @return The current size of the MemTable, in bytes.
      */
     public long getCurrentSizeInBytes() {
-       return this.currentSizeInBytes.get();
+        return this.currentSizeInBytes.get();
     }
 
     /**

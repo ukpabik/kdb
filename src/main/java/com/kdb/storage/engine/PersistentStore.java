@@ -13,7 +13,11 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -27,7 +31,7 @@ import java.util.stream.Stream;
  * @see Store
  * @see StorageEngines#createPersistentStore(Path)
  */
-final class PersistentStore implements Store<ByteBuffer, byte[]> {
+final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable {
 
     private volatile Store<ByteBuffer, byte[]> activeMemTable;
     private volatile Store<ByteBuffer, byte[]> inactiveMemTable;
@@ -36,8 +40,10 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     private final SSTableWriter tableWriter;
     private final AtomicLong sstSequenceNumber;
     private final AtomicLong logSequenceNumber;
+    private final AtomicBoolean isFlushQueued;
     private final Path directory;
     private final ExecutorService flushService;
+    private final ReadWriteLock lock;
 
     static final byte[] TOMBSTONE = new byte[0];
 
@@ -48,6 +54,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
     PersistentStore(Path directory) throws IOException {
         Objects.requireNonNull(directory);
         this.directory = directory;
+        this.lock = new ReentrantReadWriteLock();
+        this.isFlushQueued = new AtomicBoolean(false);
         this.sstSequenceNumber = loadSSTSequenceNumber();
         this.logSequenceNumber = loadLogSequenceNumber();
 
@@ -59,8 +67,10 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         this.flushService = Executors.newSingleThreadExecutor();
 
         recover();
-        // TODO: Check if we need to perform a flush here.
-        // TODO: Find some way to check if a flush is currently queued. We do not want to start multiple flushes at the same time.
+        MemTable table = (MemTable) activeMemTable;
+        if (table.getCurrentSizeInBytes() >= FLUSH_CAPACITY) {
+            triggerFlush();
+        }
     }
 
     /**
@@ -68,25 +78,31 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public Optional<byte[]> get(ByteBuffer key) {
-        Optional<byte[]> result = activeMemTable.get(key);
+        lock.readLock().lock();
+        try {
+            Optional<byte[]> result = activeMemTable.get(key.duplicate());
 
-        if (result.isPresent()) {
-            return result.get() == TOMBSTONE ? Optional.empty() : result;
-        }
-
-        if (inactiveMemTable != null) {
-            result = inactiveMemTable.get(key);
             if (result.isPresent()) {
                 return result.get() == TOMBSTONE ? Optional.empty() : result;
             }
-        }
 
-        result = tableManager.search(key);
-        if (result.isPresent()) {
-            return result.get() == TOMBSTONE ? Optional.empty() : result;
-        }
+            Store<ByteBuffer, byte[]> currentInactive = inactiveMemTable;
+            if (currentInactive != null) {
+                result = currentInactive.get(key.duplicate());
+                if (result.isPresent()) {
+                    return result.get() == TOMBSTONE ? Optional.empty() : result;
+                }
+            }
 
-        return result;
+            result = tableManager.search(key.duplicate());
+            if (result.isPresent()) {
+                return result.get() == TOMBSTONE ? Optional.empty() : result;
+            }
+
+            return result;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     /**
@@ -94,10 +110,10 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public void put(ByteBuffer key, byte[] value) {
-        // TODO: THIS FUNCTION SHOULD ACQUIRE A LOCK TO ENSURE NO CONCURRENT READ ISSUES.
+        lock.readLock().lock();
         try {
-            activeLog.append(OpCode.PUT, key, value);
-            activeMemTable.put(key, value);
+            activeLog.append(OpCode.PUT, key.duplicate(), value);
+            activeMemTable.put(key.duplicate(), value);
 
             MemTable table = (MemTable) activeMemTable;
             if (table.getCurrentSizeInBytes() >= FLUSH_CAPACITY) {
@@ -105,6 +121,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
             }
         } catch (IOException e) {
             throw new StorageException("Failed to persist data to WAL", e);
+        } finally {
+            lock.readLock().unlock();
         }
     }
 
@@ -113,17 +131,19 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      */
     @Override
     public Optional<byte[]> remove(ByteBuffer key) {
-        // TODO: THIS SHOULD ACQUIRE A READ LOCK.
+        lock.readLock().lock();
         try {
             Objects.requireNonNull(key, "Key cannot be null");
 
-            Optional<byte[]> previousValue = activeMemTable.get(key);
+            Optional<byte[]> previousValue = activeMemTable.get(key.duplicate());
 
-            activeLog.append(OpCode.DELETE, key, null);
-            activeMemTable.put(key, TOMBSTONE);
+            activeLog.append(OpCode.DELETE, key.duplicate(), null);
+            activeMemTable.put(key.duplicate(), TOMBSTONE);
             return previousValue;
         } catch (IOException e) {
             throw new StorageException("Failed to persist data to WAL", e);
+        } finally {
+            lock.readLock().unlock();
         }
     }
 
@@ -166,41 +186,43 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      * @see SSTableWriter#writeToFile(ImmutableMap, long)
      */
     void flush() throws IOException {
-        // TODO: THIS SHOULD ACQUIRE A WRITE LOCK WHILE MOVING TABLES, AND THEN RELEASE IT.
+        if (inactiveMemTable != null) {
+            return;
+        }
+
         MemTable tableToFlush;
-        ImmutableMap<ByteBuffer, byte[]> immutableMemTable;
         long currentSeqNum;
         WriteAheadLog oldLog;
 
-        synchronized (this) {
-            while (inactiveMemTable != null) {
-                try {
-                    this.wait();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("Interrupted while waiting for flush to complete", e);
-                }
-            }
-
+        lock.writeLock().lock();
+        try {
+            if (this.inactiveMemTable != null) return;
             this.inactiveMemTable = this.activeMemTable;
             this.activeMemTable = StorageEngines.createMemTable();
 
             tableToFlush = (MemTable) this.inactiveMemTable;
-            immutableMemTable = tableToFlush.immutableCopy();
-
             currentSeqNum = sstSequenceNumber.getAndIncrement();
 
-            // TODO: Rotate the log instead of clearing
             oldLog = rotateLog();
+
+            isFlushQueued.set(false);
+        } finally {
+            lock.writeLock().unlock();
         }
 
-        Path newSSTPath = tableWriter.writeToFile(immutableMemTable, currentSeqNum);
+        try {
+            ImmutableMap<ByteBuffer, byte[]> immutableMemTable = tableToFlush.immutableCopy();
+            Path newSSTPath = tableWriter.writeToFile(immutableMemTable, currentSeqNum);
 
-        synchronized (this) {
-            tableManager.registerSSTable(newSSTPath);
+            lock.writeLock().lock();
+            try {
+                tableManager.registerSSTable(newSSTPath);
+            } finally {
+                lock.writeLock().unlock();
+            }
+        } finally {
             this.inactiveMemTable = null;
             deleteLog(oldLog);
-            this.notifyAll();
         }
     }
 
@@ -208,13 +230,15 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
      * Helper function to trigger a background flush process.
      */
     private void triggerFlush() {
-        this.flushService.submit(() -> {
-            try {
-                flush();
-            } catch (IOException e) {
-                // TODO: Log this?
-            }
-        });
+        if (isFlushQueued.compareAndSet(false, true)) {
+            this.flushService.submit(() -> {
+                try {
+                    flush();
+                } catch (Throwable t) {
+                    System.err.println("CRITICAL: Background flush crashed - " + t.getMessage());
+                }
+            });
+        }
     }
 
     /**
@@ -300,6 +324,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
 
     /**
      * Loads the most recent log on disk, or creates a new one if none exist.
+     *
      * @return The most recent active log, or a new log if none exist.
      * @throws IOException In the event of a file read error.
      */
@@ -308,5 +333,31 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         Path latestLogPath = directory.resolve(fileName);
 
         return new WriteAheadLog(latestLogPath);
+    }
+
+    @Override
+    public void close() {
+        this.flushService.shutdown();
+        try {
+            if (!this.flushService.awaitTermination(2, TimeUnit.SECONDS)) {
+                this.flushService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            this.flushService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
+        try {
+            if (activeLog != null) {
+                activeLog.close();
+            }
+        } catch (IOException e) {
+            // TODO: Log this error
+        }
+    }
+
+    @Override
+    public String toString() {
+        return this.activeMemTable.toString();
     }
 }

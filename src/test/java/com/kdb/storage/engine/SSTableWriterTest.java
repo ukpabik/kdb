@@ -52,7 +52,7 @@ class SSTableWriterTest {
 
             assertEquals(SSTable.MAGIC_NUMBER, magicNumber, "Magic number must match exactly at EOF");
             assertTrue(indexOffset > 0, "Index offset should be greater than 0");
-            assertEquals(0, indexSize, "Index size should be 0 since we wrote fewer than 100 keys");
+            assertTrue(indexSize > 0, "Index size should be > 0 because the first key is always indexed");
         }
     }
 
