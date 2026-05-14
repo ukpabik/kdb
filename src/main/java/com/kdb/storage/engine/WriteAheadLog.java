@@ -1,6 +1,7 @@
 package com.kdb.storage.engine;
 
 import com.kdb.storage.common.OpCode;
+import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -123,7 +124,7 @@ public final class WriteAheadLog implements AutoCloseable {
         } catch (NoSuchFileException _) {
            // Note: Should only occur on first boot. (log doesn't exist yet)
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read WAL during recovery", e);
+            throw new StorageException("Failed to read WAL during recovery", e);
         }
     }
 

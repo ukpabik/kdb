@@ -1,6 +1,7 @@
 package com.kdb.storage.engine;
 
 import com.kdb.storage.exceptions.CorruptFileException;
+import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -37,6 +38,7 @@ final class SSTableManager {
                     return result;
                 }
             } catch (IOException e) {
+                throw new StorageException("Error while searching", e);
                 // TODO: Log error
             }
         }
@@ -67,7 +69,7 @@ final class SSTableManager {
             handleCorruptFile(filePath);
             return Optional.empty();
         } catch (IOException e) {
-            throw new RuntimeException("Error reading .sst file", e);
+            throw new StorageException("Error reading .sst file", e);
         }
     }
 
@@ -128,6 +130,7 @@ final class SSTableManager {
         try {
             Files.deleteIfExists(path);
         } catch (IOException e) {
+            throw new StorageException("Error deleting corrupt file", e);
             // TODO: Log this??
         }
     }

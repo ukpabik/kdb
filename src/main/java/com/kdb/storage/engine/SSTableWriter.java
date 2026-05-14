@@ -2,6 +2,7 @@ package com.kdb.storage.engine;
 
 
 import com.google.common.collect.ImmutableMap;
+import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -110,7 +111,7 @@ final class SSTableWriter {
             fc.force(true);
             return filePath;
         } catch (IOException e) {
-            throw new RuntimeException("Failed to write MemTable to file", e);
+            throw new StorageException("Failed to write MemTable to file", e);
         }
     }
 

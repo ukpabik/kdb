@@ -55,12 +55,12 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         Optional<byte[]> result = memTable.get(key);
 
         if (result.isPresent()){
-            return Arrays.equals(result.get(), TOMBSTONE) ? Optional.empty() : result;
+            return result.get() == TOMBSTONE ? Optional.empty() : result;
         }
-
+        
         result = tableManager.search(key);
         if (result.isPresent()) {
-            return Arrays.equals(result.get(), TOMBSTONE) ? Optional.empty() : result;
+            return result.get() == TOMBSTONE ? Optional.empty() : result;
         }
 
         return result;
@@ -71,7 +71,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         try {
             log.append(OpCode.PUT, key, value);
             memTable.put(key, value);
-        } catch(Exception e) {
+        } catch(IOException e) {
             throw new StorageException("Failed to persist data to WAL", e);
         }
     }
@@ -86,7 +86,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
             log.append(OpCode.DELETE, key, null);
             memTable.put(key, TOMBSTONE);
             return previousValue;
-        } catch (Exception e) {
+        } catch (IOException e) {
             throw new StorageException("Failed to persist data to WAL", e);
         }
     }
