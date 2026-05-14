@@ -13,6 +13,21 @@ import java.util.Optional;
 
 import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
 
+/**
+ * A read-only, on-disk data structure providing efficient key-value lookups.
+ *
+ * <p> The {@code SSTable} (Sorted String Table) stores key-value pairs sorted by key.
+ *  To avoid loading the entire file into memory, this class maintains a <b>Sparse Index</b>:
+ *  a subset of keys mapped to their byte offsets within the file. </p>
+ *
+ * <h3>On-Disk Format:</h3>
+ * <pre>
+ * [Key Size (int)][Key Data][Value Size (int)][Value Data] ... [Index Metadata]
+ * </pre>
+ *
+ * @see SSTableManager
+ * @see SSTableWriter
+ */
 final class SSTable {
 
     // Used for indicating a file is a .sst file.
@@ -29,10 +44,20 @@ final class SSTable {
         sparseIndex = ImmutableSortedMap.copyOf(index);
     }
 
+    /**
+     * @return The filesystem path where this table is stored.
+     */
     Path path() {
         return this.filePath;
     }
 
+    /**
+     * Searches for a value associated with a given key.
+     *
+     * @param key The key to look up.
+     * @return An {@link Optional} containing the byte array value if found, otherwise an empty Optional.
+     * @throws IOException If an error occurs during file I/O
+     */
     Optional<byte[]> search(ByteBuffer key) throws IOException {
         Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
 

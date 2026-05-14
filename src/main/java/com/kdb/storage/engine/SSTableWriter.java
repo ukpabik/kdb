@@ -66,7 +66,7 @@ final class SSTableWriter {
      *
      * @param memTableSnapshot an immutable map representing the current state of the MemTable
      * @return the {@link Path} to the newly created SSTable file
-     * @throws RuntimeException thrown if an I/O error occurs while creating or writing to the file
+     * @throws StorageException thrown if an I/O error occurs while creating or writing to the file
      */
     public synchronized Path writeToFile(ImmutableMap<ByteBuffer, byte[]> memTableSnapshot, long sequenceNumber) {
         Objects.requireNonNull(memTableSnapshot);
@@ -115,16 +115,10 @@ final class SSTableWriter {
         }
     }
 
-    private ByteBuffer serialize(ByteBuffer key, byte[] value) {
-        return serialize(key, ByteBuffer.wrap(value));
-    }
 
-    private ByteBuffer serialize(ByteBuffer key, long offset) {
-        ByteBuffer valueBuffer = ByteBuffer.allocate(Long.BYTES).putLong(offset);
-        valueBuffer.flip();
-        return serialize(key, valueBuffer);
-    }
-
+    /**
+     * Helper function to serialize a key and value into a single {@link ByteBuffer}.
+     */
     private ByteBuffer serialize(ByteBuffer key, ByteBuffer value) {
         Objects.requireNonNull(key);
         Objects.requireNonNull(value);
@@ -141,5 +135,22 @@ final class SSTableWriter {
 
         result.flip();
         return result;
+    }
+
+
+    /**
+     * Overloaded helper function for serializing different values.
+     */
+    private ByteBuffer serialize(ByteBuffer key, byte[] value) {
+        return serialize(key, ByteBuffer.wrap(value));
+    }
+
+    /**
+     * Overloaded helper function for serializing different values.
+     */
+    private ByteBuffer serialize(ByteBuffer key, long offset) {
+        ByteBuffer valueBuffer = ByteBuffer.allocate(Long.BYTES).putLong(offset);
+        valueBuffer.flip();
+        return serialize(key, valueBuffer);
     }
 }

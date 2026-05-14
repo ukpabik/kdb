@@ -17,6 +17,11 @@ import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
 import static java.nio.file.StandardOpenOption.READ;
 
+/**
+ * Orchestrates the lifestyle and logic for all {@link SSTable} instances.
+ *
+ * @see SSTable
+ */
 final class SSTableManager {
 
     private final Path directoryPath;
@@ -29,6 +34,13 @@ final class SSTableManager {
     }
 
 
+    /**
+     * Performs a global search for a key across all SSTables, in order from newest to oldest.
+     *
+     * @param key The key to locate.
+     * @return An {@link Optional} containing the value if found in any table, otherwise an empty Optional.
+     * @throws StorageException If there is an underlying I/O error during search.
+     */
     Optional<byte[]> search(ByteBuffer key) {
         for (SSTable table : tables) {
             try {
@@ -45,12 +57,22 @@ final class SSTableManager {
         return Optional.empty();
     }
 
+    /**
+     * Dynamically adds a new SSTable to the active pool.
+     *
+     * @param sstPath The path to the newly created .sst file.
+     */
     void registerSSTable(Path sstPath) {
         Optional<SSTable> registeredTable = tryLoad(sstPath);
 
         registeredTable.ifPresent(this.tables::add);
     }
 
+    /**
+     * Scans the directory for existing {@code .sst} files and loads them into memory.
+     *
+     * @return A list of all active SSTables.
+     */
     private List<SSTable> loadTables() throws IOException {
         try(Stream<Path> stream = Files.list(directoryPath)) {
             return stream
@@ -62,6 +84,9 @@ final class SSTableManager {
         }
     }
 
+    /**
+     * Helper function for safely loading a file.
+     */
     private Optional<SSTable> tryLoad(Path filePath) {
         try {
             return Optional.of(load(filePath));
@@ -73,6 +98,14 @@ final class SSTableManager {
         }
     }
 
+    /**
+     * Reads and parses an SSTable file from disk.
+     *
+     * @param sstPath Path to the file.
+     * @return A fully initialized {@link SSTable}.
+     * @throws IOException If there is a file read error.
+     * @throws CorruptFileException If the magic number is missing or file is corrupted.
+     */
     private SSTable load(Path sstPath) throws IOException {
         Map<ByteBuffer, Long> indexMap = new TreeMap<>();
 
@@ -126,6 +159,9 @@ final class SSTableManager {
         return new SSTable(sstPath, indexMap);
     }
 
+    /**
+     * Helper function for handling corrupt files.
+     */
     private void handleCorruptFile(Path path) {
         try {
             Files.deleteIfExists(path);
@@ -135,6 +171,9 @@ final class SSTableManager {
         }
     }
 
+    /**
+     * @return A list of all active SSTables.
+     */
     List<SSTable> tables() {
         return tables;
     }

@@ -97,10 +97,16 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
                 : Optional.of(oldValue);
         }
 
+    /**
+     * @return The current size of the MemTable, in bytes.
+     */
     public long getCurrentSizeInBytes() {
        return this.currentSizeInBytes.get();
     }
 
+    /**
+     * @return An immutable copy of the underlying Map.
+     */
     ImmutableMap<ByteBuffer, byte[]> immutableCopy() {
         return ImmutableMap.copyOf(map);
     }
@@ -110,6 +116,9 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
         this.map.clear();
     }
 
+    /**
+     * Helper function to calculate the size of a stored entry.
+     */
     private long calculateSize(ByteBuffer key, byte[] value) {
         return key.remaining() + value.length + ESTIMATED_OVERHEAD_BYTES;
     }

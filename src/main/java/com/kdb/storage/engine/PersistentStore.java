@@ -14,6 +14,8 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -50,6 +52,9 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         recover();
     }
 
+    /**
+     * @since 1.0
+     */
     @Override
     public Optional<byte[]> get(ByteBuffer key) {
         Optional<byte[]> result = memTable.get(key);
@@ -66,6 +71,9 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         return result;
     }
 
+    /**
+     * @since 1.0
+     */
     @Override
     public void put(ByteBuffer key, byte[] value) {
         try {
@@ -76,6 +84,9 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         }
     }
 
+    /**
+     * @since 1.0
+     */
     @Override
     public Optional<byte[]> remove(ByteBuffer key) {
         try {
@@ -91,12 +102,24 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         }
     }
 
+    /**
+     * Recovers the WAL log from disk.
+     *
+     * @throws IOException in case of file read error
+     * @see WriteAheadLog#replay(BiConsumer, Consumer) 
+     */
     private void recover() throws IOException {
         log.replay(memTable::put, (key) -> {
           memTable.put(key, TOMBSTONE);
         });
     }
 
+    /**
+     * Writes the current {@link MemTable} to disk, and resets state.
+     * 
+     * @throws IOException in case of file read error
+     * @see SSTableWriter#writeToFile(ImmutableMap, long)
+     */
     private void flush() throws IOException {
         MemTable table = (MemTable) memTable;
         ImmutableMap<ByteBuffer, byte[]> immutableMemTable = table.immutableCopy();
@@ -109,6 +132,13 @@ final class PersistentStore implements Store<ByteBuffer, byte[]> {
         log.clear();
     }
 
+    /**
+     * Loads the sequence number from disk into memory.
+     *
+     * @param directory the directory where the {@link PersistentStore} is held.
+     * @return the sequence number as an {@link AtomicLong}
+     * @throws IOException in case of file read error
+     */
     private AtomicLong loadSequenceNumber(Path directory) throws IOException {
         try (Stream<Path> stream = Files.list(directory)) {
             long maxSequence = stream
