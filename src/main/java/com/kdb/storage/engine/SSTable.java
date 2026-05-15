@@ -1,12 +1,14 @@
 package com.kdb.storage.engine;
 
 import com.google.common.collect.ImmutableSortedMap;
+import com.kdb.storage.common.KVPair;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -35,13 +37,17 @@ final class SSTable {
 
     private final Path filePath;
     private final ImmutableSortedMap<ByteBuffer, Long> sparseIndex;
+    private final long indexOffset;
+    private final long sequenceNumber;
 
 
-    SSTable(Path path, Map<ByteBuffer, Long> index) {
+    SSTable(Path path, Map<ByteBuffer, Long> index, long indexOffset, long sequenceNumber) {
         Objects.requireNonNull(path);
         Objects.requireNonNull(index);
         filePath = path;
         sparseIndex = ImmutableSortedMap.copyOf(index);
+        this.indexOffset = indexOffset;
+        this.sequenceNumber = sequenceNumber;
     }
 
     /**
@@ -49,6 +55,14 @@ final class SSTable {
      */
     Path path() {
         return this.filePath;
+    }
+
+    long sequenceNumber() {
+        return this.sequenceNumber;
+    }
+
+    long indexOffset() {
+        return this.indexOffset;
     }
 
     /**
@@ -60,33 +74,36 @@ final class SSTable {
      */
     Optional<byte[]> search(ByteBuffer key) throws IOException {
         Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
-
-        long offset = (indexEntry == null) ? 0L : indexEntry.getValue();
+        long currentOffset = (indexEntry == null) ? 0L : indexEntry.getValue();
 
         try (FileChannel fc = FileChannel.open(this.filePath, StandardOpenOption.READ)) {
-            fc.position(offset);
+            long fileSize = fc.size();
 
-            while (fc.position() < fc.size() - INDEX_BUFFER_LENGTH) {
-                ByteBuffer keySize = ByteBuffer.allocate(Integer.BYTES);
-                fc.read(keySize);
-                keySize.flip();
+            while (currentOffset < fileSize - INDEX_BUFFER_LENGTH) {
+                ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
+                fc.read(keySizeBuf, currentOffset);
+                keySizeBuf.flip();
+                int kSize = keySizeBuf.getInt();
+                currentOffset += Integer.BYTES;
 
-                ByteBuffer keyBytes = ByteBuffer.allocate(keySize.getInt());
-                fc.read(keyBytes);
+                ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
+                fc.read(keyBytes, currentOffset);
                 keyBytes.flip();
+                currentOffset += kSize;
 
-                ByteBuffer valueSize = ByteBuffer.allocate(Integer.BYTES);
-                fc.read(valueSize);
-                valueSize.flip();
+                ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
+                fc.read(valueSizeBuf, currentOffset);
+                valueSizeBuf.flip();
+                int vSize = valueSizeBuf.getInt();
+                currentOffset += Integer.BYTES;
 
-                int vSize = valueSize.getInt();
                 int compare = key.compareTo(keyBytes);
                 if (compare == 0) {
                     ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-                    fc.read(valueBytes);
+                    fc.read(valueBytes, currentOffset);
                     return Optional.of(valueBytes.array());
                 } else if (compare > 0) {
-                    fc.position(fc.position() + vSize);
+                    currentOffset += vSize;
                 } else {
                     break;
                 }
@@ -94,5 +111,9 @@ final class SSTable {
         }
 
         return Optional.empty();
+    }
+
+    Iterator<KVPair> iterator() throws IOException {
+        return new SSTableIterator(this, indexOffset);
     }
 }

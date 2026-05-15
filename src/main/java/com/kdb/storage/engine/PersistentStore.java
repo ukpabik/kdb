@@ -38,17 +38,21 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
     private WriteAheadLog activeLog;
     private final SSTableManager tableManager;
     private final SSTableWriter tableWriter;
+    private final CompactionManager compactionManager;
     private final AtomicLong sstSequenceNumber;
     private final AtomicLong logSequenceNumber;
     private final AtomicBoolean isFlushQueued;
+    private final AtomicBoolean isCompactionQueued;
     private final Path directory;
     private final ExecutorService flushService;
+    private final ExecutorService compactService;
     private final ReadWriteLock lock;
 
     static final byte[] TOMBSTONE = new byte[0];
 
     // 4 MB flush capacity
     private static final int FLUSH_CAPACITY = 4_000_000;
+    private static final int COMPACTION_CAPACITY = 6;
 
 
     PersistentStore(Path directory) throws IOException {
@@ -56,6 +60,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
         this.directory = directory;
         this.lock = new ReentrantReadWriteLock();
         this.isFlushQueued = new AtomicBoolean(false);
+        this.isCompactionQueued = new AtomicBoolean(false);
         this.sstSequenceNumber = loadSSTSequenceNumber();
         this.logSequenceNumber = loadLogSequenceNumber();
 
@@ -64,7 +69,10 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
 
         this.tableManager = new SSTableManager(directory);
         this.tableWriter = new SSTableWriter(directory);
+        this.compactionManager = new CompactionManager(directory);
         this.flushService = Executors.newSingleThreadExecutor();
+        this.compactService = Executors.newSingleThreadExecutor();
+
 
         recover();
         MemTable table = (MemTable) activeMemTable;
@@ -223,6 +231,11 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
         } finally {
             this.inactiveMemTable = null;
             deleteLog(oldLog);
+
+            int numTables = tableManager.tables().size();
+            if (numTables >= COMPACTION_CAPACITY) {
+                triggerCompaction();
+            }
         }
     }
 
@@ -236,6 +249,20 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
                     flush();
                 } catch (Throwable t) {
                     System.err.println("CRITICAL: Background flush crashed - " + t.getMessage());
+                }
+            });
+        }
+    }
+
+    private void triggerCompaction() {
+        if (isCompactionQueued.compareAndSet(false, true)) {
+            this.compactService.submit(() -> {
+                try {
+                    compactionManager.compact(tableManager.tables());
+                } catch (Throwable t) {
+                    System.err.println("CRITICAL: Background compaction crashed - " + t.getMessage());
+                } finally {
+                    isCompactionQueued.set(false);
                 }
             });
         }
@@ -354,10 +381,5 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
         } catch (IOException e) {
             // TODO: Log this error
         }
-    }
-
-    @Override
-    public String toString() {
-        return this.activeMemTable.toString();
     }
 }

@@ -1,5 +1,6 @@
 package com.kdb.storage.engine;
 
+import com.google.common.collect.ImmutableList;
 import com.kdb.storage.exceptions.CorruptFileException;
 import com.kdb.storage.exceptions.StorageException;
 
@@ -8,6 +9,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
@@ -26,7 +28,7 @@ final class SSTableManager {
 
     private final Path directoryPath;
     private final List<SSTable> tables;
-    
+
     SSTableManager(Path directory) throws IOException {
         this.directoryPath = directory;
 
@@ -74,7 +76,7 @@ final class SSTableManager {
      * @return A list of all active SSTables.
      */
     private List<SSTable> loadTables() throws IOException {
-        try(Stream<Path> stream = Files.list(directoryPath)) {
+        try (Stream<Path> stream = Files.list(directoryPath)) {
             return stream
                     .filter(path -> path.toString().endsWith(".sst"))
                     .map(this::tryLoad)
@@ -90,7 +92,7 @@ final class SSTableManager {
     private Optional<SSTable> tryLoad(Path filePath) {
         try {
             return Optional.of(load(filePath));
-        } catch(CorruptFileException e) {
+        } catch (CorruptFileException e) {
             handleCorruptFile(filePath);
             return Optional.empty();
         } catch (IOException e) {
@@ -103,20 +105,24 @@ final class SSTableManager {
      *
      * @param sstPath Path to the file.
      * @return A fully initialized {@link SSTable}.
-     * @throws IOException If there is a file read error.
+     * @throws IOException          If there is a file read error.
      * @throws CorruptFileException If the magic number is missing or file is corrupted.
      */
     private SSTable load(Path sstPath) throws IOException {
-        Map<ByteBuffer, Long> indexMap = new TreeMap<>();
+        TreeMap<ByteBuffer, Long> indexMap = new TreeMap<>();
+        long indexOffset;
 
-        try (FileChannel fc = FileChannel.open(sstPath, READ)) {
-            fc.position(fc.size() - INDEX_BUFFER_LENGTH);
+        long sequenceNumber = extractSequenceNumber(sstPath.getFileName().toString());
 
+        try (FileChannel fc = FileChannel.open(sstPath, StandardOpenOption.READ)) {
+            long fileSize = fc.size();
+
+            long footerOffset = fileSize - INDEX_BUFFER_LENGTH;
             ByteBuffer footerBytes = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
-            fc.read(footerBytes);
+            fc.read(footerBytes, footerOffset);
             footerBytes.flip();
 
-            long indexOffset = footerBytes.getLong();
+            indexOffset = footerBytes.getLong();
             long indexSize = footerBytes.getLong();
             int magicNumber = footerBytes.getInt();
 
@@ -124,29 +130,39 @@ final class SSTableManager {
                 throw new CorruptFileException("This SST file is corrupted.");
             }
 
-            fc.position(indexOffset);
+            long currentOffset = indexOffset;
+            long bytesReadFromIndex = 0;
 
-            long bytesRead = 0;
-            while(bytesRead < indexSize) {
-                ByteBuffer keySize = ByteBuffer.allocate(Integer.BYTES);
-                bytesRead += keySize.remaining();
-                fc.read(keySize);
-                keySize.flip();
+            while (bytesReadFromIndex < indexSize) {
+                ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
+                fc.read(keySizeBuf, currentOffset);
+                keySizeBuf.flip();
+                int kSize = keySizeBuf.getInt();
 
-                ByteBuffer keyBytes = ByteBuffer.allocate(keySize.getInt());
-                bytesRead += keyBytes.remaining();
-                fc.read(keyBytes);
+                currentOffset += Integer.BYTES;
+                bytesReadFromIndex += Integer.BYTES;
+
+                ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
+                fc.read(keyBytes, currentOffset);
                 keyBytes.flip();
 
-                ByteBuffer valueSize = ByteBuffer.allocate(Integer.BYTES);
-                bytesRead += valueSize.remaining();
-                fc.read(valueSize);
-                valueSize.flip();
+                currentOffset += kSize;
+                bytesReadFromIndex += kSize;
 
-                ByteBuffer valueBytes = ByteBuffer.allocate(valueSize.getInt());
-                bytesRead += valueBytes.remaining();
-                fc.read(valueBytes);
+                ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
+                fc.read(valueSizeBuf, currentOffset);
+                valueSizeBuf.flip();
+                int vSize = valueSizeBuf.getInt();
+
+                currentOffset += Integer.BYTES;
+                bytesReadFromIndex += Integer.BYTES;
+
+                ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
+                fc.read(valueBytes, currentOffset);
                 valueBytes.flip();
+
+                currentOffset += vSize;
+                bytesReadFromIndex += vSize;
 
                 ByteBuffer keyToStore = ByteBuffer.allocate(keyBytes.remaining());
                 keyToStore.put(keyBytes);
@@ -156,7 +172,7 @@ final class SSTableManager {
             }
         }
 
-        return new SSTable(sstPath, indexMap);
+        return new SSTable(sstPath, indexMap, indexOffset, sequenceNumber);
     }
 
     /**
@@ -172,9 +188,20 @@ final class SSTableManager {
     }
 
     /**
+     * Helper to extract the sequence number from filenames.
+     */
+    private long extractSequenceNumber(String fileName) {
+        try {
+            return Long.parseLong(fileName.replaceAll("[^0-9]", ""));
+        } catch (NumberFormatException e) {
+            throw new CorruptFileException("Invalid SSTable filename: " + fileName);
+        }
+    }
+
+    /**
      * @return A list of all active SSTables.
      */
     List<SSTable> tables() {
-        return tables;
+        return ImmutableList.copyOf(tables);
     }
 }
