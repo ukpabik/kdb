@@ -254,6 +254,9 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
         }
     }
 
+    /**
+     * Helper function to trigger a background compaction process.
+     */
     private void triggerCompaction() {
         if (isCompactionQueued.compareAndSet(false, true)) {
             this.compactService.submit(() -> {

@@ -113,6 +113,10 @@ final class SSTable {
         return Optional.empty();
     }
 
+    /**
+     * @return A {@link SSTableIterator} object on this SSTable.
+     * @throws IOException In case of file read error.
+     */
     Iterator<KVPair> iterator() throws IOException {
         return new SSTableIterator(this, indexOffset);
     }

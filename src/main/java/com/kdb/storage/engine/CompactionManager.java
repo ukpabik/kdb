@@ -17,10 +17,27 @@ import static com.kdb.storage.engine.SSTableWriter.INDEX_SEGMENT;
 import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.StandardOpenOption.CREATE;
 
+/**
+ *  Manages and coordinates the background compaction process for the storage engine.
+ *
+ *  <p>Compaction is essentially the garbage collection system of an LSM-Tree. As data flushes
+ *  from volatile memory into immutable {@link SSTable} files, keys become fragmented and obsolete
+ *  values accumulate across multiple files. This manager performs an asynchronous K-Way Merge
+ *  to reconcile duplicates and consolidate disk space.</p>
+ *
+ * @see SSTable
+ * @see SSTableIterator
+ */
 final class CompactionManager {
     private final Path directory;
 
-    private final Comparator mergeNodeComparator = Comparator
+    /**
+     * Comparator for sorting {@link MergeNode} entries within the min-heap.
+     * <p>Primary Sort (Ascending): Lexicographical comparison of byte keys.</p>
+     * <p>Secondary Sort (Descending): Chronological sorting via the sequence number.
+     * Higher sequence numbers (newer records) take structural priority during data collisions.</p>
+     */
+    private final Comparator<MergeNode> mergeNodeComparator = Comparator
             .comparing((MergeNode node) -> node.pair().key())
             .thenComparing(MergeNode::sequenceNumber, Collections.reverseOrder());
 
@@ -31,6 +48,12 @@ final class CompactionManager {
         this.directory = directory;
     }
 
+    /**
+     * Executes a compaction run by merging a collection of source SSTables into a single, highly optimized target file.
+     *
+     * @param immutableTableList The list of active SSTables, ordered by creation date.
+     * @throws IOException In case of file read error.
+     */
     void compact(List<SSTable> immutableTableList) throws IOException {
         ByteBuffer lastWrittenKey = null;
         boolean isFirstKey = true;
