@@ -10,6 +10,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.*;
 
+import static com.kdb.storage.common.Serializer.serialize;
 import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.StandardOpenOption.CREATE;
@@ -42,9 +43,9 @@ final class SSTableWriter {
     private static final String SST_FILE_EXT = ".sst";
     private static final int SST_FILENAME_SIZE = 32;
     private final Path directoryPath;
-
     // Index for every 100 keys
-    private static final int INDEX_SEGMENT = 100;
+    static final int INDEX_SEGMENT = 100;
+
     private final Random rand = new Random();
 
     static final int INDEX_BUFFER_LENGTH = 20;
@@ -123,41 +124,4 @@ final class SSTableWriter {
     }
 
 
-    /**
-     * Helper function to serialize a key and value into a single {@link ByteBuffer}.
-     */
-    private ByteBuffer serialize(ByteBuffer key, ByteBuffer value) {
-        Objects.requireNonNull(key);
-        Objects.requireNonNull(value);
-
-        int totalSize = (Integer.BYTES * 2) + key.remaining() + value.remaining();
-
-        ByteBuffer result = ByteBuffer.allocate(totalSize);
-
-        result.putInt(key.remaining());
-        result.put(key.duplicate());
-
-        result.putInt(value.remaining());
-        result.put(value.duplicate());
-
-        result.flip();
-        return result;
-    }
-
-
-    /**
-     * Overloaded helper function for serializing different values.
-     */
-    private ByteBuffer serialize(ByteBuffer key, byte[] value) {
-        return serialize(key, ByteBuffer.wrap(value));
-    }
-
-    /**
-     * Overloaded helper function for serializing different values.
-     */
-    private ByteBuffer serialize(ByteBuffer key, long offset) {
-        ByteBuffer valueBuffer = ByteBuffer.allocate(Long.BYTES).putLong(offset);
-        valueBuffer.flip();
-        return serialize(key, valueBuffer);
-    }
 }

@@ -1,14 +1,19 @@
 package com.kdb.storage.engine;
 
-import com.google.common.collect.ImmutableMap;
 import com.kdb.storage.common.KVPair;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 
+import static com.kdb.storage.common.Serializer.serialize;
+import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
+import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
+import static com.kdb.storage.engine.SSTableWriter.INDEX_SEGMENT;
 import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.StandardOpenOption.CREATE;
 
@@ -27,9 +32,10 @@ final class CompactionManager {
     }
 
     void compact(List<SSTable> immutableTableList) throws IOException {
-        ByteBuffer lastWrittenKey;
+        ByteBuffer lastWrittenKey = null;
         boolean isFirstKey = true;
         Path compactionFile = directory.resolve("tmpCompactFile.tmp");
+        Path newPath = immutableTableList.getLast().path();
         PriorityQueue<MergeNode> pq = new PriorityQueue<>(mergeNodeComparator);
         List<SSTableIterator> iterators = new ArrayList<>();
 
@@ -45,24 +51,54 @@ final class CompactionManager {
         int counter = 0;
         Map<ByteBuffer, Long> indexMap = new TreeMap<>();
         try (FileChannel fc = FileChannel.open(compactionFile, CREATE, APPEND)) {
-            MergeNode currentNode = pq.poll();
+            while (!pq.isEmpty()) {
+                MergeNode currentNode = pq.poll();
+                ByteBuffer key = currentNode.pair().key().duplicate();
+                ByteBuffer value = currentNode.pair().value().duplicate();
 
-            if (isFirstKey) {
-                isFirstKey = false;
+                if (isFirstKey) {
+                    indexMap.put(key, fc.size());
+                    isFirstKey = false;
+                }
+
+                if (!key.equals(lastWrittenKey)) {
+                    ByteBuffer serializedBytes = serialize(key, value);
+                    counter++;
+
+                    if (counter == INDEX_SEGMENT) {
+                        counter = 0;
+                        indexMap.put(currentNode.pair().key(), fc.size());
+                    }
+
+                    fc.write(serializedBytes);
+                }
+
+                if (currentNode.iterator().hasNext()) {
+                    pq.add(new MergeNode(currentNode.iterator().next(), currentNode.sequenceNumber(), currentNode.iterator()));
+                }
+
+                lastWrittenKey = key.duplicate();
             }
 
-            // TODO:
 
-            /**
-             * TODO: Finish this logic here.
-             * Step by step:
-             *  Check if first key, if so, add to index.
-             *  Check if equal to lastWrittenKey
-             *      if so, we don't add it and do the hasNext check (add next key in iterator to pq).
-             *  Update lastWrittenKey to current key.
-             *  Increase counter and see if we add to index here.
-             *  Write this to file and do hasNext check (add next key in iterator to pq, if exists).
-             */
+            ByteBuffer indexBuffer = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
+            long indexOffset = fc.size();
+            long indexSize = 0;
+
+            for (Map.Entry<ByteBuffer, Long> entry : indexMap.entrySet()) {
+                ByteBuffer serializedBytes = serialize(entry.getKey(), entry.getValue());
+                indexSize += serializedBytes.remaining();
+                fc.write(serializedBytes);
+            }
+
+            indexBuffer.putLong(indexOffset);
+            indexBuffer.putLong(indexSize);
+            indexBuffer.putInt(MAGIC_NUMBER);
+            indexBuffer.flip();
+
+            fc.write(indexBuffer);
+            fc.force(true);
+            Files.move(compactionFile, newPath, StandardCopyOption.REPLACE_EXISTING);
         } finally {
             closeIterators(iterators);
         }
