@@ -11,24 +11,19 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 final class SSTableIterator implements Iterator<KVPair>, AutoCloseable {
-    private final Path filePath;
     private final FileChannel readChannel;
     private final long fileReadLimit;
     private long currentOffset = 0;
 
     SSTableIterator(SSTable table, long fileLimit) throws IOException {
-        this.filePath = table.path();
+        Path filePath = table.path();
         readChannel = FileChannel.open(filePath, StandardOpenOption.READ);
         fileReadLimit = fileLimit;
     }
 
     @Override
     public boolean hasNext() {
-        try {
-            return this.readChannel.position() < fileReadLimit;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return this.currentOffset < fileReadLimit;
     }
 
     /**

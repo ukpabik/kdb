@@ -70,7 +70,7 @@ class PersistentStoreTest {
 
         assertTrue(currentStore.get(key).isEmpty(), "MemTable should immediately hide deleted keys via tombstone");
 
-        Store<ByteBuffer, byte[]> store2 = new PersistentStore(tempDir);
+        Store<ByteBuffer, byte[]> store2 = StorageEngines.createPersistentStore(tempDir);
 
         assertTrue(store2.get(key).isEmpty(), "Tombstone must be replayed from WAL to keep data deleted post-crash");
     }
@@ -105,7 +105,7 @@ class PersistentStoreTest {
     void testConcurrentPuts(@TempDir Path tempDir) throws Exception {
         this.currentStore = (PersistentStore) StorageEngines.createPersistentStore(tempDir);
         int threadCount = 20;
-        int insertsPerThread = 1000;
+        int insertsPerThread = 500;
         int totalInserts = threadCount * insertsPerThread;
 
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);

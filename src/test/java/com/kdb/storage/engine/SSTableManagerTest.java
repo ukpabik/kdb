@@ -1,6 +1,5 @@
 package com.kdb.storage.engine;
 
-import com.kdb.storage.exceptions.CorruptFileException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -11,81 +10,111 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class SSTableManagerTest {
 
-    private static final int VALID_MAGIC_NUMBER = SSTable.MAGIC_NUMBER;
-
-    @TempDir
-    Path tempDir;
+    private static final int MAGIC_NUMBER = SSTable.MAGIC_NUMBER;
+    private static final int INDEX_BUFFER_LENGTH = 20;
 
     @Test
-    void testEmptyDirectoryLoadsNoTables() throws IOException {
+    void testLoadTablesAndSortOrder(@TempDir Path tempDir) throws Exception {
+        Path file1 = tempDir.resolve("00001.sst");
+        Path file2 = tempDir.resolve("00003.sst");
+        Path file3 = tempDir.resolve("00002.sst");
+
+        Map<String, Long> dummyIndex = Map.of("apple", 100L);
+
+        createMockSSTable(file1, dummyIndex, MAGIC_NUMBER);
+        createMockSSTable(file2, dummyIndex, MAGIC_NUMBER);
+        createMockSSTable(file3, dummyIndex, MAGIC_NUMBER);
+
         SSTableManager manager = new SSTableManager(tempDir);
-        assertTrue(manager.tables().isEmpty(), "Manager should initialize with an empty list when no files exist.");
+        List<SSTable> activeTables = manager.tables();
+
+        assertEquals(3, activeTables.size(), "Manager should load all 3 valid SSTables");
+        assertTrue(activeTables.get(0).path().endsWith("00003.sst"), "Newest sequence number must be first");
+        assertTrue(activeTables.get(1).path().endsWith("00002.sst"), "Middle sequence number must be second");
+        assertTrue(activeTables.get(2).path().endsWith("00001.sst"), "Oldest sequence number must be last");
     }
 
     @Test
-    void testCorruptedFileIsGracefullyDeleted() throws IOException {
-        Path corruptedPath = tempDir.resolve("00001.sst");
-        createMockSSTable(corruptedPath, 999999);
+    void testCorruptFileIsGracefullyDeleted(@TempDir Path tempDir) throws Exception {
+        Path validFile = tempDir.resolve("00001.sst");
+        Path corruptFile = tempDir.resolve("00002.sst");
 
-        assertTrue(Files.exists(corruptedPath), "Corrupted file should exist before manager loads.");
+        createMockSSTable(validFile, Map.of("key1", 50L), MAGIC_NUMBER);
+        createMockSSTable(corruptFile, Map.of("key2", 60L), 0xBADBAD); // Invalid Magic Number
 
         SSTableManager manager = new SSTableManager(tempDir);
+        List<SSTable> activeTables = manager.tables();
 
-        assertTrue(manager.tables().isEmpty(), "Corrupted file should not be loaded into memory.");
-        assertFalse(Files.exists(corruptedPath), "Manager should have self-healed and deleted the corrupted file.");
+        assertEquals(1, activeTables.size(), "Manager should skip the corrupted table");
+        assertTrue(activeTables.getFirst().path().endsWith("00001.sst"));
+
+        assertFalse(Files.exists(corruptFile), "Manager must actively delete corrupted files from disk");
     }
 
     @Test
-    void testValidFilesLoadedAndSortedChronologically() throws IOException {
-        Path table1 = tempDir.resolve("00001.sst");
-        Path table3 = tempDir.resolve("00003.sst");
-        Path table2 = tempDir.resolve("00002.sst");
-
-        createMockSSTable(table1, VALID_MAGIC_NUMBER);
-        createMockSSTable(table3, VALID_MAGIC_NUMBER);
-        createMockSSTable(table2, VALID_MAGIC_NUMBER);
-
-        SSTableManager manager = new SSTableManager(tempDir);
-        List<SSTable> loadedTables = manager.tables();
-
-        assertEquals(3, loadedTables.size(), "All 3 valid tables should be loaded.");
-
-        assertEquals(table3, loadedTables.get(0).path(), "00003.sst should be first");
-        assertEquals(table2, loadedTables.get(1).path(), "00002.sst should be second");
-        assertEquals(table1, loadedTables.get(2).path(), "00001.sst should be third");
-    }
-
-    @Test
-    void testRegisterNewSSTableDynamically() throws IOException {
+    void testRegisterNewSSTable(@TempDir Path tempDir) throws Exception {
         SSTableManager manager = new SSTableManager(tempDir);
         assertTrue(manager.tables().isEmpty());
 
-        Path newTable = tempDir.resolve("00001.sst");
-        createMockSSTable(newTable, VALID_MAGIC_NUMBER);
+        Path newFile = tempDir.resolve("00001.sst");
+        createMockSSTable(newFile, Map.of("new_key", 100L), MAGIC_NUMBER);
 
-        manager.registerSSTable(newTable);
+        manager.registerSSTable(newFile);
 
-        assertEquals(1, manager.tables().size(), "Table should be dynamically registered.");
-        assertEquals(newTable, manager.tables().getFirst().path());
+        assertEquals(1, manager.tables().size());
+        assertTrue(manager.tables().getFirst().path().endsWith("00001.sst"), "New table should be added to the active list");
+    }
+
+    @Test
+    void testInvalidFilenameIsRejected(@TempDir Path tempDir) throws Exception {
+        Path badNameFile = tempDir.resolve("garbage_name.sst");
+        createMockSSTable(badNameFile, Map.of("key", 0L), MAGIC_NUMBER);
+
+        SSTableManager manager = new SSTableManager(tempDir);
+
+        assertTrue(manager.tables().isEmpty(), "File with bad name should not be loaded");
+        assertFalse(Files.exists(badNameFile), "File with bad name should be treated as corrupt and deleted");
     }
 
     /**
-     * Helper Method: Crafts a raw binary SSTable file with a valid footer structure.
-     * We set indexSize to 0 so the while loop in the manager safely skips reading index entries,
-     * allowing us to strictly test the file parsing and magic number validation.
+     * Helper method to craft a raw, perfectly formatted .sst file
+     * exactly the way your SSTableManager expects to read it.
      */
-    private void createMockSSTable(Path path, int magicNumber) throws IOException {
+    private void createMockSSTable(Path path, Map<String, Long> indexEntries, int magicNumber) throws IOException {
         try (FileChannel fc = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
-            long indexOffset = 0;
-            long indexSize = 0;
 
-            // Allocate 20 bytes for the footer: [offset: 8] [size: 8] [magic: 4]
-            ByteBuffer footer = ByteBuffer.allocate(20);
+            fc.write(ByteBuffer.wrap("dummy_data_block_".getBytes()));
+
+            long indexOffset = fc.position();
+            long indexStart = fc.position();
+
+            for (Map.Entry<String, Long> entry : indexEntries.entrySet()) {
+                byte[] keyBytes = entry.getKey().getBytes();
+
+                ByteBuffer kSizeBuf = ByteBuffer.allocate(Integer.BYTES).putInt(keyBytes.length);
+                kSizeBuf.flip();
+                fc.write(kSizeBuf);
+
+                fc.write(ByteBuffer.wrap(keyBytes));
+
+                ByteBuffer vSizeBuf = ByteBuffer.allocate(Integer.BYTES).putInt(Long.BYTES);
+                vSizeBuf.flip();
+                fc.write(vSizeBuf);
+
+                ByteBuffer valBuf = ByteBuffer.allocate(Long.BYTES).putLong(entry.getValue());
+                valBuf.flip();
+                fc.write(valBuf);
+            }
+
+            long indexSize = fc.position() - indexStart;
+
+            ByteBuffer footer = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
             footer.putLong(indexOffset);
             footer.putLong(indexSize);
             footer.putInt(magicNumber);
