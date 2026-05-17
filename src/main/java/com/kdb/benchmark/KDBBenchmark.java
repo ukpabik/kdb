@@ -49,8 +49,6 @@ public class KDBBenchmark {
 
             shuffleArray(keys);
             runBenchmark("readrandom", store, keys, null, NUM_OPERATIONS, false);
-
-            printFootprint(dbDirectory);
         } finally {
             cleanDirectory(dbDirectory);
         }
@@ -90,19 +88,6 @@ public class KDBBenchmark {
         }
     }
 
-    private static void printFootprint(Path dbDirectory) throws IOException {
-        Runtime runtime = Runtime.getRuntime();
-        long usedMemoryBytes = runtime.totalMemory() - runtime.freeMemory();
-        long diskSpaceBytes = calculateDirectorySize(dbDirectory);
-        long rawDataBytes = (long) NUM_OPERATIONS * BYTES_PER_OP;
-
-        System.out.println("\n--- Footprint Analysis ---");
-        System.out.printf("Raw Size:   %.1f MB (estimated)\n", rawDataBytes / (1024.0 * 1024.0));
-        System.out.printf("File Size:  %.1f MB (estimated)\n", diskSpaceBytes / (1024.0 * 1024.0));
-        System.out.printf("Space Amplification: %.2fx\n", (double) diskSpaceBytes / rawDataBytes);
-        System.out.printf("JVM Memory: %.1f MB\n", usedMemoryBytes / (1024.0 * 1024.0));
-    }
-
     private static void shuffleArray(ByteBuffer[] array) {
         Random rnd = new Random();
         for (int i = array.length - 1; i > 0; i--) {
@@ -110,15 +95,6 @@ public class KDBBenchmark {
             ByteBuffer a = array[index];
             array[index] = array[i];
             array[i] = a;
-        }
-    }
-
-    private static long calculateDirectorySize(Path path) throws IOException {
-        if (!Files.exists(path)) return 0;
-        try (Stream<Path> stream = Files.walk(path)) {
-            return stream.filter(p -> p.toFile().isFile())
-                    .mapToLong(p -> p.toFile().length())
-                    .sum();
         }
     }
 
