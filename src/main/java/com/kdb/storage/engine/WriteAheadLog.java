@@ -1,6 +1,7 @@
 package com.kdb.storage.engine;
 
 import com.kdb.storage.common.OpCode;
+import com.kdb.storage.common.SafeReadWrite;
 import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
@@ -10,6 +11,10 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -28,6 +33,7 @@ import java.util.function.Consumer;
 public final class WriteAheadLog implements AutoCloseable {
     private final Path filePath;
     private final FileChannel channel;
+    private final ScheduledExecutorService syncService;
 
     public WriteAheadLog(Path filePath) throws IOException {
         Objects.requireNonNull(filePath);
@@ -36,6 +42,17 @@ public final class WriteAheadLog implements AutoCloseable {
                 StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE,
                 StandardOpenOption.APPEND);
+        this.syncService = Executors.newSingleThreadScheduledExecutor();
+
+        this.syncService.scheduleAtFixedRate(() -> {
+            try {
+                if (channel.isOpen()) {
+                    channel.force(true);
+                }
+            } catch (IOException e) {
+                // TODO: Log this?
+            }
+        }, 50, 50, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -65,11 +82,7 @@ public final class WriteAheadLog implements AutoCloseable {
         }
 
         serialized.flip();
-        while (serialized.hasRemaining()) {
-            channel.write(serialized);
-        }
-
-        channel.force(true);
+        SafeReadWrite.writeFully(channel, serialized);
     }
 
     /**
@@ -131,7 +144,10 @@ public final class WriteAheadLog implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        channel.close();
+        if (channel.isOpen()) {
+            channel.force(true);
+            channel.close();
+        }
     }
 
     Path path() {

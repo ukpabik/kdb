@@ -89,7 +89,7 @@ final class SSTable {
         try (FileChannel fc = FileChannel.open(this.filePath, StandardOpenOption.READ)) {
             long fileSize = fc.size();
 
-            while (currentOffset < fileSize - INDEX_BUFFER_LENGTH) {
+            while (currentOffset < this.indexOffset) {
                 ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
                 SafeReadWrite.readFully(fc, keySizeBuf, currentOffset);
                 keySizeBuf.flip();
