@@ -3,6 +3,7 @@ package com.kdb.storage.engine;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.hash.BloomFilter;
 import com.kdb.storage.common.KVPair;
+import com.kdb.storage.common.SafeReadWrite;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -90,18 +91,18 @@ final class SSTable {
 
             while (currentOffset < fileSize - INDEX_BUFFER_LENGTH) {
                 ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                fc.read(keySizeBuf, currentOffset);
+                SafeReadWrite.readFully(fc, keySizeBuf, currentOffset);
                 keySizeBuf.flip();
                 int kSize = keySizeBuf.getInt();
                 currentOffset += Integer.BYTES;
 
                 ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-                fc.read(keyBytes, currentOffset);
+                SafeReadWrite.readFully(fc, keyBytes, currentOffset);
                 keyBytes.flip();
                 currentOffset += kSize;
 
                 ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                fc.read(valueSizeBuf, currentOffset);
+                SafeReadWrite.readFully(fc, valueSizeBuf, currentOffset);
                 valueSizeBuf.flip();
                 int vSize = valueSizeBuf.getInt();
                 currentOffset += Integer.BYTES;
@@ -109,7 +110,7 @@ final class SSTable {
                 int compare = key.compareTo(keyBytes);
                 if (compare == 0) {
                     ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-                    fc.read(valueBytes, currentOffset);
+                    SafeReadWrite.readFully(fc, valueBytes, currentOffset);
                     return Optional.of(valueBytes.array());
                 } else if (compare > 0) {
                     currentOffset += vSize;

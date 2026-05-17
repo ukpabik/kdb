@@ -4,6 +4,7 @@ package com.kdb.storage.engine;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
+import com.kdb.storage.common.SafeReadWrite;
 import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
@@ -107,7 +108,7 @@ final class SSTableWriter {
                     indexMap.put(entry.getKey(), fc.size());
                 }
 
-                fc.write(serializedBytes);
+                SafeReadWrite.writeFully(fc, serializedBytes);
             }
 
             long indexOffset = fc.size();
@@ -116,7 +117,7 @@ final class SSTableWriter {
             for (Map.Entry<ByteBuffer, Long> entry : indexMap.entrySet()) {
                 ByteBuffer serializedBytes = serialize(entry.getKey(), entry.getValue());
                 indexSize += serializedBytes.remaining();
-                fc.write(serializedBytes);
+                SafeReadWrite.writeFully(fc, serializedBytes);
             }
 
             long bloomOffset = fc.size();
@@ -132,7 +133,7 @@ final class SSTableWriter {
             indexBuffer.putInt(MAGIC_NUMBER);
             indexBuffer.flip();
 
-            fc.write(indexBuffer);
+            SafeReadWrite.writeFully(fc, indexBuffer);
             fc.force(true);
             return filePath;
         } catch (IOException e) {

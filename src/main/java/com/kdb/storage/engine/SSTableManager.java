@@ -3,6 +3,7 @@ package com.kdb.storage.engine;
 import com.google.common.collect.ImmutableList;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
+import com.kdb.storage.common.SafeReadWrite;
 import com.kdb.storage.exceptions.CorruptFileException;
 import com.kdb.storage.exceptions.StorageException;
 
@@ -122,7 +123,7 @@ final class SSTableManager {
 
             long footerOffset = fileSize - INDEX_BUFFER_LENGTH;
             ByteBuffer footerBytes = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
-            fc.read(footerBytes, footerOffset);
+            SafeReadWrite.readFully(fc, footerBytes, footerOffset);
             footerBytes.flip();
 
             indexOffset = footerBytes.getLong();
@@ -139,7 +140,7 @@ final class SSTableManager {
 
             while (bytesReadFromIndex < indexSize) {
                 ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                fc.read(keySizeBuf, currentOffset);
+                SafeReadWrite.readFully(fc, keySizeBuf, currentOffset);
                 keySizeBuf.flip();
                 int kSize = keySizeBuf.getInt();
 
@@ -147,14 +148,14 @@ final class SSTableManager {
                 bytesReadFromIndex += Integer.BYTES;
 
                 ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-                fc.read(keyBytes, currentOffset);
+                SafeReadWrite.readFully(fc, keyBytes, currentOffset);
                 keyBytes.flip();
 
                 currentOffset += kSize;
                 bytesReadFromIndex += kSize;
 
                 ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                fc.read(valueSizeBuf, currentOffset);
+                SafeReadWrite.readFully(fc, valueSizeBuf, currentOffset);
                 valueSizeBuf.flip();
                 int vSize = valueSizeBuf.getInt();
 
@@ -162,7 +163,7 @@ final class SSTableManager {
                 bytesReadFromIndex += Integer.BYTES;
 
                 ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-                fc.read(valueBytes, currentOffset);
+                SafeReadWrite.readFully(fc, valueBytes, currentOffset);
                 valueBytes.flip();
 
                 currentOffset += vSize;
@@ -178,7 +179,7 @@ final class SSTableManager {
             long bloomSize = footerOffset - bloomOffset;
 
             ByteBuffer bloomBuffer = ByteBuffer.allocate((int) bloomSize);
-            fc.read(bloomBuffer, bloomOffset);
+            SafeReadWrite.readFully(fc, bloomBuffer, bloomOffset);
             bloomBuffer.flip();
 
             try (InputStream is = new ByteArrayInputStream(bloomBuffer.array())) {

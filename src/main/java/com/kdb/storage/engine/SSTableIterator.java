@@ -1,6 +1,7 @@
 package com.kdb.storage.engine;
 
 import com.kdb.storage.common.KVPair;
+import com.kdb.storage.common.SafeReadWrite;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -60,24 +61,24 @@ final class SSTableIterator implements Iterator<KVPair>, AutoCloseable {
         }
         try {
             ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
-            this.readChannel.read(keySizeBuf, currentOffset);
+            SafeReadWrite.readFully(this.readChannel, keySizeBuf, currentOffset);
             keySizeBuf.flip();
             int kSize = keySizeBuf.getInt();
             currentOffset += Integer.BYTES;
 
             ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-            this.readChannel.read(keyBytes, currentOffset);
+            SafeReadWrite.readFully(this.readChannel, keyBytes, currentOffset);
             keyBytes.flip();
             currentOffset += kSize;
 
             ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
-            this.readChannel.read(valueSizeBuf, currentOffset);
+            SafeReadWrite.readFully(this.readChannel, valueSizeBuf, currentOffset);
             valueSizeBuf.flip();
             int vSize = valueSizeBuf.getInt();
             currentOffset += Integer.BYTES;
 
             ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-            this.readChannel.read(valueBytes, currentOffset);
+            SafeReadWrite.readFully(this.readChannel, valueBytes, currentOffset);
             valueBytes.flip();
             currentOffset += vSize;
 

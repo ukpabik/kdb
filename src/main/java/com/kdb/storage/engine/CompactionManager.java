@@ -3,6 +3,7 @@ package com.kdb.storage.engine;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import com.kdb.storage.common.KVPair;
+import com.kdb.storage.common.SafeReadWrite;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -104,7 +105,7 @@ final class CompactionManager {
                         indexMap.put(currentNode.pair().key(), fc.size());
                     }
 
-                    fc.write(serializedBytes);
+                    SafeReadWrite.writeFully(fc, serializedBytes);
                 }
 
                 if (currentNode.iterator().hasNext()) {
@@ -120,7 +121,7 @@ final class CompactionManager {
             for (Map.Entry<ByteBuffer, Long> entry : indexMap.entrySet()) {
                 ByteBuffer serializedBytes = serialize(entry.getKey(), entry.getValue());
                 indexSize += serializedBytes.remaining();
-                fc.write(serializedBytes);
+                SafeReadWrite.writeFully(fc, serializedBytes);
             }
 
             long bloomOffset = fc.size();
@@ -135,7 +136,7 @@ final class CompactionManager {
             indexBuffer.putInt(MAGIC_NUMBER);
             indexBuffer.flip();
 
-            fc.write(indexBuffer);
+            SafeReadWrite.writeFully(fc, indexBuffer);
             fc.force(true);
             Files.move(compactionFile, newPath, StandardCopyOption.REPLACE_EXISTING);
             return new SSTable(newPath, indexMap, indexOffset, immutableTableList.getLast().sequenceNumber(), bloomFilter);
