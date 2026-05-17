@@ -1,9 +1,13 @@
 package com.kdb.storage.engine;
 
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.Funnels;
 import com.kdb.storage.common.KVPair;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,7 +58,7 @@ final class CompactionManager {
      * @param immutableTableList The list of active SSTables, ordered by creation date.
      * @throws IOException In case of file read error.
      */
-    void compact(List<SSTable> immutableTableList) throws IOException {
+    SSTable compact(List<SSTable> immutableTableList) throws IOException {
         ByteBuffer lastWrittenKey = null;
         boolean isFirstKey = true;
         Path compactionFile = directory.resolve("tmpCompactFile.tmp");
@@ -73,6 +77,9 @@ final class CompactionManager {
 
         int counter = 0;
         Map<ByteBuffer, Long> indexMap = new TreeMap<>();
+
+        BloomFilter<byte[]> bloomFilter = BloomFilter.create(Funnels.byteArrayFunnel(), 100_000, 0.01);
+
         try (FileChannel fc = FileChannel.open(compactionFile, CREATE, APPEND)) {
             while (!pq.isEmpty()) {
                 MergeNode currentNode = pq.poll();
@@ -85,6 +92,10 @@ final class CompactionManager {
                 }
 
                 if (!key.equals(lastWrittenKey)) {
+                    byte[] keyBytesArr = new byte[key.remaining()];
+                    key.duplicate().get(keyBytesArr);
+                    bloomFilter.put(keyBytesArr);
+
                     ByteBuffer serializedBytes = serialize(key, value);
                     counter++;
 
@@ -103,8 +114,6 @@ final class CompactionManager {
                 lastWrittenKey = key.duplicate();
             }
 
-
-            ByteBuffer indexBuffer = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
             long indexOffset = fc.size();
             long indexSize = 0;
 
@@ -114,17 +123,26 @@ final class CompactionManager {
                 fc.write(serializedBytes);
             }
 
+            long bloomOffset = fc.size();
+            OutputStream os = Channels.newOutputStream(fc);
+            bloomFilter.writeTo(os);
+            os.flush();
+
+            ByteBuffer indexBuffer = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
             indexBuffer.putLong(indexOffset);
             indexBuffer.putLong(indexSize);
+            indexBuffer.putLong(bloomOffset);
             indexBuffer.putInt(MAGIC_NUMBER);
             indexBuffer.flip();
 
             fc.write(indexBuffer);
             fc.force(true);
             Files.move(compactionFile, newPath, StandardCopyOption.REPLACE_EXISTING);
+            return new SSTable(newPath, indexMap, indexOffset, immutableTableList.getLast().sequenceNumber(), bloomFilter);
         } finally {
             closeIterators(iterators);
         }
+
     }
 
     private void closeIterators(List<SSTableIterator> iterators) {

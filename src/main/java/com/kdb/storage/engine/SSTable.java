@@ -1,6 +1,7 @@
 package com.kdb.storage.engine;
 
 import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.hash.BloomFilter;
 import com.kdb.storage.common.KVPair;
 
 import java.io.IOException;
@@ -39,15 +40,17 @@ final class SSTable {
     private final ImmutableSortedMap<ByteBuffer, Long> sparseIndex;
     private final long indexOffset;
     private final long sequenceNumber;
+    private final BloomFilter<byte[]> bloomFilter;
 
 
-    SSTable(Path path, Map<ByteBuffer, Long> index, long indexOffset, long sequenceNumber) {
+    SSTable(Path path, Map<ByteBuffer, Long> index, long indexOffset, long sequenceNumber, BloomFilter<byte[]> filter) {
         Objects.requireNonNull(path);
         Objects.requireNonNull(index);
         filePath = path;
         sparseIndex = ImmutableSortedMap.copyOf(index);
         this.indexOffset = indexOffset;
         this.sequenceNumber = sequenceNumber;
+        this.bloomFilter = filter;
     }
 
     /**
@@ -73,6 +76,12 @@ final class SSTable {
      * @throws IOException If an error occurs during file I/O
      */
     Optional<byte[]> search(ByteBuffer key) throws IOException {
+        byte[] keyBytesArr = new byte[key.remaining()];
+        key.duplicate().get(keyBytesArr);
+        if (!bloomFilter.mightContain(keyBytesArr)) {
+            return Optional.empty();
+        }
+
         Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
         long currentOffset = (indexEntry == null) ? 0L : indexEntry.getValue();
 

@@ -1,10 +1,14 @@
 package com.kdb.storage.engine;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.Funnels;
 import com.kdb.storage.exceptions.CorruptFileException;
 import com.kdb.storage.exceptions.StorageException;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -17,7 +21,6 @@ import java.util.stream.Stream;
 
 import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
-import static java.nio.file.StandardOpenOption.READ;
 
 /**
  * Orchestrates the lifestyle and logic for all {@link SSTable} instances.
@@ -111,8 +114,8 @@ final class SSTableManager {
     private SSTable load(Path sstPath) throws IOException {
         TreeMap<ByteBuffer, Long> indexMap = new TreeMap<>();
         long indexOffset;
-
         long sequenceNumber = extractSequenceNumber(sstPath.getFileName().toString());
+        BloomFilter<byte[]> bloomFilter;
 
         try (FileChannel fc = FileChannel.open(sstPath, StandardOpenOption.READ)) {
             long fileSize = fc.size();
@@ -124,6 +127,7 @@ final class SSTableManager {
 
             indexOffset = footerBytes.getLong();
             long indexSize = footerBytes.getLong();
+            long bloomOffset = footerBytes.getLong();
             int magicNumber = footerBytes.getInt();
 
             if (magicNumber != MAGIC_NUMBER) {
@@ -170,9 +174,41 @@ final class SSTableManager {
 
                 indexMap.put(keyToStore, valueBytes.getLong());
             }
+
+            long bloomSize = footerOffset - bloomOffset;
+
+            ByteBuffer bloomBuffer = ByteBuffer.allocate((int) bloomSize);
+            fc.read(bloomBuffer, bloomOffset);
+            bloomBuffer.flip();
+
+            try (InputStream is = new ByteArrayInputStream(bloomBuffer.array())) {
+                bloomFilter = BloomFilter.readFrom(is, Funnels.byteArrayFunnel());
+            }
         }
 
-        return new SSTable(sstPath, indexMap, indexOffset, sequenceNumber);
+        return new SSTable(sstPath, indexMap, indexOffset, sequenceNumber, bloomFilter);
+    }
+
+    /**
+     * Removes all old files for the newly compacted file.
+     *
+     * @param oldTables List of all old tables to be removed.
+     * @param newTable The newly compacted .sst file.
+     */
+    public synchronized void replaceCompactedTables(List<SSTable> oldTables, SSTable newTable) {
+        this.tables.removeAll(oldTables);
+
+        this.tables.addFirst(newTable);
+
+        for (SSTable table : oldTables) {
+            if (!table.path().equals(newTable.path())) {
+                try {
+                    Files.deleteIfExists(table.path());
+                } catch (IOException e) {
+                    // TODO: Log this
+                }
+            }
+        }
     }
 
     /**

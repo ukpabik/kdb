@@ -122,4 +122,10 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
     private long calculateSize(ByteBuffer key, byte[] value) {
         return key.remaining() + value.length + ESTIMATED_OVERHEAD_BYTES;
     }
+
+    @Override
+    public void close() {
+        // No-op: MemTable holds exclusively heap-allocated memory (ConcurrentSkipListMap).
+        // No native OS resources or file descriptors to release.
+    }
 }

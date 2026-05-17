@@ -23,14 +23,25 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
- * A high-performance, thread-safe, persistent key value store.
+ * A high-performance, thread-safe, persistent key-value store implementing an LSM-Tree architecture.
  *
- * <p>Provides a link between {@link MemTable} and {@link WriteAheadLog}
- * to create a crash-resilient data store, optimized for writes.</p>
+ * It coordinates a volatile in-memory layer ({@link MemTable}) with a crash-resilient write-ahead log ({@link WriteAheadLog})
+ * and an immutable on-disk storage tier of Sorted String Tables ({@link SSTable}) to optimize write-heavy workloads.
+ *
+ * <p>To mitigate read amplification and reclaim disk space from duplicate or deleted records, a background compaction engine executes
+ * a thread-safe K-Way merge to atomically replace obsolete source files without blocking active readers.
+ * </p>
+ *
+ * <p>It also utilizes a bloom filter under the hood to perform quicker reads for nonexistent keys.</p>
  *
  * @see Store
+ * @see MemTable
+ * @see WriteAheadLog
+ * @see SSTable
  * @see StorageEngines#createPersistentStore(Path)
+ * @since 1.0
  */
+
 final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable {
 
     private volatile Store<ByteBuffer, byte[]> activeMemTable;
@@ -175,8 +186,6 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
             return;
         }
 
-        // TODO: Add logging
-
         for (Path logPath : logFiles) {
             try (WriteAheadLog recoveryLog = new WriteAheadLog(logPath)) {
                 recoveryLog.replay(
@@ -261,7 +270,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
         if (isCompactionQueued.compareAndSet(false, true)) {
             this.compactService.submit(() -> {
                 try {
-                    compactionManager.compact(tableManager.tables());
+                    SSTable newTable = compactionManager.compact(tableManager.tables());
+                    tableManager.replaceCompactedTables(tableManager.tables(), newTable);
                 } catch (Throwable t) {
                     System.err.println("CRITICAL: Background compaction crashed - " + t.getMessage());
                 } finally {

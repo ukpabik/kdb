@@ -2,10 +2,14 @@ package com.kdb.storage.engine;
 
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.Funnels;
 import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.*;
@@ -48,7 +52,7 @@ final class SSTableWriter {
 
     private final Random rand = new Random();
 
-    static final int INDEX_BUFFER_LENGTH = 20;
+    static final int INDEX_BUFFER_LENGTH = 28;
 
     /**
      * Initializes the SSTableWriter with a target directory for new files.
@@ -62,7 +66,7 @@ final class SSTableWriter {
     /**
      * Persists a snapshot of the MemTable to a newly generated SSTable file.
      * * <p>Generates a random filename, sequentially writes all key-value pairs,
-     * builds a sparse index to optimize read performance, and appends a footer
+     * builds a sparse index and bloom filter to optimize read performance, and appends a footer
      * for file validation and index location.</p>
      *
      * @param memTableSnapshot an immutable map representing the current state of the MemTable
@@ -75,12 +79,19 @@ final class SSTableWriter {
         String fileName = String.format("%05d%s", sequenceNumber, SST_FILE_EXT);
         Path filePath = Path.of(directoryPath.toString(), fileName);
 
-        int counter = 0; // For telling us what key we are on
+        int counter = 0;
         Map<ByteBuffer, Long> indexMap = new TreeMap<>();
+
+        BloomFilter<byte[]> bloomFilter = BloomFilter.create(
+                Funnels.byteArrayFunnel(), Math.max(1, memTableSnapshot.size()), 0.01);
 
         try (FileChannel fc = FileChannel.open(filePath, CREATE, APPEND)) {
             boolean isFirstKey = true;
             for (ImmutableMap.Entry<ByteBuffer, byte[]> entry : memTableSnapshot.entrySet()) {
+
+                byte[] keyBytes = new byte[entry.getKey().remaining()];
+                entry.getKey().duplicate().get(keyBytes);
+                bloomFilter.put(keyBytes);
 
                 if (isFirstKey) {
                     indexMap.put(entry.getKey(), fc.size());
@@ -99,8 +110,6 @@ final class SSTableWriter {
                 fc.write(serializedBytes);
             }
 
-            // Index format: [index offset: 8 bytes, index size: 8 bytes, magic number (to know sst): 4 bytes]
-            ByteBuffer indexBuffer = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
             long indexOffset = fc.size();
             long indexSize = 0;
 
@@ -110,8 +119,16 @@ final class SSTableWriter {
                 fc.write(serializedBytes);
             }
 
+            long bloomOffset = fc.size();
+            OutputStream os = Channels.newOutputStream(fc);
+            bloomFilter.writeTo(os);
+            os.flush();
+
+            // Index format: [index offset: 8 bytes, index size: 8 bytes, bloom offset: 8 bytes, magic number (to know sst): 4 bytes]
+            ByteBuffer indexBuffer = ByteBuffer.allocate(INDEX_BUFFER_LENGTH);
             indexBuffer.putLong(indexOffset);
             indexBuffer.putLong(indexSize);
+            indexBuffer.putLong(bloomOffset);
             indexBuffer.putInt(MAGIC_NUMBER);
             indexBuffer.flip();
 
