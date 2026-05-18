@@ -302,10 +302,15 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
         if (isCompactionQueued.compareAndSet(false, true)) {
             this.compactService.submit(() -> {
                 try {
-                    SSTable newTable = compactionManager.compact(tableManager.tables());
-                    tableManager.replaceCompactedTables(tableManager.tables(), newTable);
+                    List<SSTable> snapshot = tableManager.tables();
+                    if (snapshot.isEmpty()) {
+                        return;
+                    }
+                    SSTable newTable = compactionManager.compact(snapshot);
+                    tableManager.replaceCompactedTables(snapshot, newTable);
                 } catch (Throwable t) {
                     System.err.println("CRITICAL: Background compaction crashed - " + t.getMessage());
+                    t.printStackTrace();
                 } finally {
                     isCompactionQueued.set(false);
                 }
@@ -412,10 +417,10 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
         this.flushService.shutdown();
         this.compactService.shutdown();
         try {
-            if (!this.flushService.awaitTermination(2, TimeUnit.SECONDS)) {
+            if (!this.flushService.awaitTermination(20, TimeUnit.SECONDS)) {
                 this.flushService.shutdownNow();
             }
-            if (!this.compactService.awaitTermination(2, TimeUnit.SECONDS)) {
+            if (!this.compactService.awaitTermination(20, TimeUnit.SECONDS)) {
                 this.compactService.shutdownNow();
             }
         } catch (InterruptedException e) {
