@@ -1,10 +1,14 @@
 package com.kdb.storage.engine;
 
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.Weigher;
 import com.google.common.collect.ImmutableMap;
 import com.kdb.storage.Store;
 import com.kdb.storage.common.OpCode;
 import com.kdb.storage.exceptions.StorageException;
+import org.jspecify.annotations.NonNull;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -22,6 +26,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+
+import static com.kdb.storage.common.Serializer.calculateSize;
 
 /**
  * A high-performance, thread-safe, persistent key-value store implementing an LSM-Tree architecture.
@@ -63,8 +69,12 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
     static final byte[] TOMBSTONE = new byte[0];
 
     // 4 MB flush capacity
-    private static final int FLUSH_CAPACITY = 4_000_000;
+    private static final int FLUSH_CAPACITY = 6_000_000;
     private static final int COMPACTION_CAPACITY = 6;
+
+    // 30MB cache
+    private static final long CACHE_SIZE_LIMIT = FLUSH_CAPACITY * 5;
+    private final Cache<ByteBuffer, byte[]> memCache;
 
 
     PersistentStore(Path directory) throws IOException {
@@ -78,13 +88,21 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
         this.activeMemTable = StorageEngines.createMemTable();
         this.activeLog = loadLog();
-
         this.tableManager = new SSTableManager(directory);
         this.tableWriter = new SSTableWriter(directory);
         this.compactionManager = new CompactionManager(directory);
         this.flushService = Executors.newSingleThreadExecutor();
         this.compactService = Executors.newSingleThreadExecutor();
 
+        this.memCache = CacheBuilder
+                .newBuilder()
+                .maximumWeight(CACHE_SIZE_LIMIT)
+                .weigher(new Weigher<ByteBuffer, byte[]>() {
+                    public int weigh(@NonNull ByteBuffer key, byte @NonNull [] value) {
+                        return (int) calculateSize(key, value);
+                    }
+                })
+                .build();
 
         recover();
         MemTable table = (MemTable) activeMemTable;
@@ -100,26 +118,19 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
     public Optional<byte[]> get(ByteBuffer key) {
         lock.readLock().lock();
         try {
-            Optional<byte[]> result = activeMemTable.get(key.duplicate());
+            ByteBuffer searchKey = key.duplicate();
+            byte[] cachedValue = memCache.getIfPresent(searchKey);
+            if (cachedValue != null) {
+               return cachedValue == TOMBSTONE ? Optional.empty() : Optional.of(cachedValue);
+            }
 
+            Optional<byte[]> result = lookupInStorage(searchKey);
             if (result.isPresent()) {
-                return result.get() == TOMBSTONE ? Optional.empty() : result;
+                memCache.put(searchKey, result.get());
+            } else {
+                memCache.put(searchKey, TOMBSTONE);
             }
-
-            Store<ByteBuffer, byte[]> currentInactive = inactiveMemTable;
-            if (currentInactive != null) {
-                result = currentInactive.get(key.duplicate());
-                if (result.isPresent()) {
-                    return result.get() == TOMBSTONE ? Optional.empty() : result;
-                }
-            }
-
-            result = tableManager.search(key.duplicate());
-            if (result.isPresent()) {
-                return result.get() == TOMBSTONE ? Optional.empty() : result;
-            }
-
-            return result;
+            return result.filter(bytes -> bytes != TOMBSTONE);
         } finally {
             lock.readLock().unlock();
         }
@@ -143,6 +154,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
             throw new StorageException("Failed to persist data to WAL", e);
         } finally {
             lock.readLock().unlock();
+            memCache.invalidate(key.duplicate());
         }
     }
 
@@ -164,6 +176,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
             throw new StorageException("Failed to persist data to WAL", e);
         } finally {
             lock.readLock().unlock();
+            memCache.invalidate(key.duplicate());
         }
     }
 
@@ -195,6 +208,24 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
                 );
             }
         }
+    }
+
+    /**
+     * Looks up a given key across all storage areas.
+     *
+     * @param key The key to be searched for.
+     * @return The value, if exists, or an Optional empty if not exists.
+     */
+    private Optional<byte[]> lookupInStorage(ByteBuffer key) {
+        Optional<byte[]> result = activeMemTable.get(key);
+        if (result.isPresent()) return result;
+
+        if (inactiveMemTable != null) {
+            result = inactiveMemTable.get(key);
+            if (result.isPresent()) return result;
+        }
+
+        return tableManager.search(key);
     }
 
     /**
