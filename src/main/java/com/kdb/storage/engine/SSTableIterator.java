@@ -91,6 +91,8 @@ final class SSTableIterator implements Iterator<KVPair>, AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        this.readChannel.close();
+        if (this.readChannel.isOpen()) {
+            this.readChannel.close();
+        }
     }
 }

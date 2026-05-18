@@ -8,6 +8,7 @@ import com.kdb.storage.exceptions.CorruptFileException;
 import com.kdb.storage.exceptions.StorageException;
 
 import java.io.ByteArrayInputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -28,7 +29,7 @@ import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
  *
  * @see SSTable
  */
-final class SSTableManager {
+final class SSTableManager implements Closeable {
 
     private final Path directoryPath;
     private final List<SSTable> tables;
@@ -242,5 +243,12 @@ final class SSTableManager {
      */
     List<SSTable> tables() {
         return ImmutableList.copyOf(tables);
+    }
+
+    @Override
+    public void close() throws IOException {
+        for (SSTable table : tables) {
+            table.close();
+        }
     }
 }

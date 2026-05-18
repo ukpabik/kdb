@@ -6,6 +6,7 @@ import com.kdb.storage.Store;
 import com.kdb.storage.common.OpCode;
 import com.kdb.storage.exceptions.StorageException;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -42,7 +43,7 @@ import java.util.stream.Stream;
  * @since 1.0
  */
 
-final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable {
+final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
     private volatile Store<ByteBuffer, byte[]> activeMemTable;
     private volatile Store<ByteBuffer, byte[]> inactiveMemTable;
@@ -378,11 +379,16 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
     @Override
     public void close() {
         this.flushService.shutdown();
+        this.compactService.shutdown();
         try {
             if (!this.flushService.awaitTermination(2, TimeUnit.SECONDS)) {
                 this.flushService.shutdownNow();
             }
+            if (!this.compactService.awaitTermination(2, TimeUnit.SECONDS)) {
+                this.compactService.shutdownNow();
+            }
         } catch (InterruptedException e) {
+            this.compactService.shutdownNow();
             this.flushService.shutdownNow();
             Thread.currentThread().interrupt();
         }
@@ -391,6 +397,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, AutoCloseable 
             if (activeLog != null) {
                 activeLog.close();
             }
+
+            this.tableManager.close();
         } catch (IOException e) {
             // TODO: Log this error
         }

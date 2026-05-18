@@ -5,6 +5,7 @@ import com.google.common.hash.BloomFilter;
 import com.kdb.storage.common.KVPair;
 import com.kdb.storage.common.SafeReadWrite;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -32,7 +33,7 @@ import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
  * @see SSTableManager
  * @see SSTableWriter
  */
-final class SSTable {
+final class SSTable implements Closeable {
 
     // Used for indicating a file is a .sst file.
     static final int MAGIC_NUMBER = 0x4B444249;
@@ -131,5 +132,12 @@ final class SSTable {
      */
     Iterator<KVPair> iterator() throws IOException {
         return new SSTableIterator(this, indexOffset);
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (this.channel.isOpen()) {
+            this.channel.close();
+        }
     }
 }
