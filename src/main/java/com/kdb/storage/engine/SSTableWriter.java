@@ -47,13 +47,18 @@ final class SSTableWriter {
 
     private static final String SST_FILE_EXT = ".sst";
     private static final int SST_FILENAME_SIZE = 32;
+
+    // 64KB Pages
+    private static final int PAGE_BUFFER_SIZE = 64 * 1024;
     private final Path directoryPath;
+
     // Index for every 100 keys
     static final int INDEX_SEGMENT = 100;
 
     private final Random rand = new Random();
 
     static final int INDEX_BUFFER_LENGTH = 28;
+
 
     /**
      * Initializes the SSTableWriter with a target directory for new files.
@@ -86,6 +91,9 @@ final class SSTableWriter {
         BloomFilter<byte[]> bloomFilter = BloomFilter.create(
                 Funnels.byteArrayFunnel(), Math.max(1, memTableSnapshot.size()), 0.01);
 
+        ByteBuffer pageBuf = ByteBuffer.allocate(PAGE_BUFFER_SIZE);
+        long currentOffset = 0;
+
         try (FileChannel fc = FileChannel.open(filePath, CREATE, APPEND)) {
             boolean isFirstKey = true;
             for (ImmutableMap.Entry<ByteBuffer, byte[]> entry : memTableSnapshot.entrySet()) {
@@ -94,21 +102,37 @@ final class SSTableWriter {
                 entry.getKey().duplicate().get(keyBytes);
                 bloomFilter.put(keyBytes);
 
-                if (isFirstKey) {
-                    indexMap.put(entry.getKey(), fc.size());
-                    isFirstKey = false;
-                }
-
                 ByteBuffer serializedBytes = serialize(entry.getKey(), entry.getValue());
+                int pairLength = serializedBytes.remaining();
 
+
+                if (isFirstKey) {
+                    indexMap.put(entry.getKey(), currentOffset);
+                    isFirstKey = false;
+                } else if (counter == INDEX_SEGMENT) {
+                    counter = 0;
+                    indexMap.put(entry.getKey(), currentOffset);
+                }
                 counter++;
 
-                if (counter == INDEX_SEGMENT) {
-                    counter = 0;
-                    indexMap.put(entry.getKey(), fc.size());
-                }
+                if (pageBuf.remaining() < pairLength) {
+                    if (pageBuf.position() == 0) {
+                        SafeReadWrite.writeFully(fc, serializedBytes);
+                        currentOffset += pairLength;
+                        continue;
+                    }
 
-                SafeReadWrite.writeFully(fc, serializedBytes);
+                    pageBuf.flip();
+                    SafeReadWrite.writeFully(fc, pageBuf);
+                    pageBuf.clear();
+                }
+                pageBuf.put(serializedBytes);
+                currentOffset += pairLength;
+            }
+
+            if (pageBuf.position() > 0) {
+                pageBuf.flip();
+                SafeReadWrite.writeFully(fc, pageBuf);
             }
 
             long indexOffset = fc.size();
