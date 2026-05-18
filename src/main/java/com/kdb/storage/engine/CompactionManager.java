@@ -19,8 +19,7 @@ import static com.kdb.storage.common.Serializer.serialize;
 import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
 import static com.kdb.storage.engine.SSTableWriter.INDEX_SEGMENT;
-import static java.nio.file.StandardOpenOption.APPEND;
-import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.*;
 
 /**
  *  Manages and coordinates the background compaction process for the storage engine.
@@ -102,7 +101,7 @@ final class CompactionManager {
                     key.duplicate().get(keyBytesArr);
                     bloomFilter.put(keyBytesArr);
 
-                    ByteBuffer serializedBytes = serialize(key, value);
+                    ByteBuffer serializedBytes = serialize(key.duplicate(), value.duplicate());
                     counter++;
 
                     if (counter == INDEX_SEGMENT) {
