@@ -19,12 +19,6 @@ import static com.kdb.storage.engine.PersistentStore.TOMBSTONE;
  * average time complexity for all operations while ensuring sorted behavior and thread safety
  * through non-blocking operations.
  *
- * <p><b>Constraints:</b>
- * <ul>
- * <li><b>Volatility:</b> All data is lost upon JVM termination.</li>
- * <li><b>Value Limits:</b> Values are limited to 1 MB maximum per entry.</li>
- * </ul>
- *
  * @see Store
  * @see StorageEngines#createMemTable()
  * @since 1.0
