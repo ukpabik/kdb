@@ -4,10 +4,12 @@ import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.hash.BloomFilter;
 import com.kdb.storage.common.KVPair;
 import com.kdb.storage.common.SafeReadWrite;
+import com.kdb.storage.exceptions.StorageException;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -87,40 +89,38 @@ final class SSTable implements Closeable {
             return Optional.empty();
         }
 
-        Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
-        long currentOffset = (indexEntry == null) ? 0L : indexEntry.getValue();
+        try {
+            MappedByteBuffer dataBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, indexOffset);
 
-        long fileSize = channel.size();
-        ByteBuffer integerSize = ByteBuffer.allocate(Integer.BYTES);
+            Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
+            int currentOffset = (indexEntry == null) ? 0 : indexEntry.getValue().intValue();
 
-        while (currentOffset < this.indexOffset) {
-            SafeReadWrite.readFully(channel, integerSize, currentOffset);
-            integerSize.flip();
-            int kSize = integerSize.getInt();
-            currentOffset += Integer.BYTES;
-            integerSize.clear();
+            while (currentOffset < this.indexOffset) {
+                int kSize = dataBuffer.getInt(currentOffset);
+                currentOffset += Integer.BYTES;
 
-            ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-            SafeReadWrite.readFully(channel, keyBytes, currentOffset);
-            keyBytes.flip();
-            currentOffset += kSize;
+                dataBuffer.position(currentOffset);
+                ByteBuffer keyBytes = dataBuffer.slice();
+                keyBytes.limit(kSize);
+                currentOffset += kSize;
 
-            SafeReadWrite.readFully(channel, integerSize, currentOffset);
-            integerSize.flip();
-            int vSize = integerSize.getInt();
-            currentOffset += Integer.BYTES;
-            integerSize.clear();
+                int vSize = dataBuffer.getInt(currentOffset);
+                currentOffset += Integer.BYTES;
 
-            int compare = key.compareTo(keyBytes);
-            if (compare == 0) {
-                ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-                SafeReadWrite.readFully(channel, valueBytes, currentOffset);
-                return Optional.of(valueBytes.array());
-            } else if (compare > 0) {
-                currentOffset += vSize;
-            } else {
-                break;
+                int compare = key.compareTo(keyBytes);
+                if (compare == 0) {
+                    byte[] valueBytes = new byte[vSize];
+                    dataBuffer.position(currentOffset);
+                    dataBuffer.get(valueBytes);
+                    return Optional.of(valueBytes);
+                } else if (compare > 0) {
+                    currentOffset += vSize;
+                } else {
+                    break;
+                }
             }
+        } catch (IOException e) {
+            throw new StorageException("Failed execution during search", e);
         }
 
         return Optional.empty();
