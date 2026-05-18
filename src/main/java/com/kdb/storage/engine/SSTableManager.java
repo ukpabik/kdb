@@ -137,12 +137,14 @@ final class SSTableManager {
 
             long currentOffset = indexOffset;
             long bytesReadFromIndex = 0;
+            ByteBuffer integerSize = ByteBuffer.allocate(Integer.BYTES);
 
             while (bytesReadFromIndex < indexSize) {
-                ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                SafeReadWrite.readFully(fc, keySizeBuf, currentOffset);
-                keySizeBuf.flip();
-                int kSize = keySizeBuf.getInt();
+                SafeReadWrite.readFully(fc, integerSize, currentOffset);
+                integerSize.flip();
+                int kSize = integerSize.getInt();
+                integerSize.clear();
+
 
                 currentOffset += Integer.BYTES;
                 bytesReadFromIndex += Integer.BYTES;
@@ -154,10 +156,10 @@ final class SSTableManager {
                 currentOffset += kSize;
                 bytesReadFromIndex += kSize;
 
-                ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                SafeReadWrite.readFully(fc, valueSizeBuf, currentOffset);
-                valueSizeBuf.flip();
-                int vSize = valueSizeBuf.getInt();
+                SafeReadWrite.readFully(fc, integerSize, currentOffset);
+                integerSize.flip();
+                int vSize = integerSize.getInt();
+                integerSize.clear();
 
                 currentOffset += Integer.BYTES;
                 bytesReadFromIndex += Integer.BYTES;

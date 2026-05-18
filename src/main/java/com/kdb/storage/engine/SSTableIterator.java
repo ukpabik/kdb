@@ -60,6 +60,7 @@ final class SSTableIterator implements Iterator<KVPair>, AutoCloseable {
             throw new NoSuchElementException("No more elements left in iterator.");
         }
         try {
+
             ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
             SafeReadWrite.readFully(this.readChannel, keySizeBuf, currentOffset);
             keySizeBuf.flip();

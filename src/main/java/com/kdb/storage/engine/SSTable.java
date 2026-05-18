@@ -41,10 +41,12 @@ final class SSTable {
     private final ImmutableSortedMap<ByteBuffer, Long> sparseIndex;
     private final long indexOffset;
     private final long sequenceNumber;
+
     private final BloomFilter<byte[]> bloomFilter;
+    private final FileChannel channel;
 
 
-    SSTable(Path path, Map<ByteBuffer, Long> index, long indexOffset, long sequenceNumber, BloomFilter<byte[]> filter) {
+    SSTable(Path path, Map<ByteBuffer, Long> index, long indexOffset, long sequenceNumber, BloomFilter<byte[]> filter) throws IOException {
         Objects.requireNonNull(path);
         Objects.requireNonNull(index);
         filePath = path;
@@ -52,6 +54,7 @@ final class SSTable {
         this.indexOffset = indexOffset;
         this.sequenceNumber = sequenceNumber;
         this.bloomFilter = filter;
+        this.channel = FileChannel.open(filePath, StandardOpenOption.READ);
     }
 
     /**
@@ -86,37 +89,36 @@ final class SSTable {
         Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
         long currentOffset = (indexEntry == null) ? 0L : indexEntry.getValue();
 
-        try (FileChannel fc = FileChannel.open(this.filePath, StandardOpenOption.READ)) {
-            long fileSize = fc.size();
+        long fileSize = channel.size();
+        ByteBuffer integerSize = ByteBuffer.allocate(Integer.BYTES);
 
-            while (currentOffset < this.indexOffset) {
-                ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                SafeReadWrite.readFully(fc, keySizeBuf, currentOffset);
-                keySizeBuf.flip();
-                int kSize = keySizeBuf.getInt();
-                currentOffset += Integer.BYTES;
+        while (currentOffset < this.indexOffset) {
+            SafeReadWrite.readFully(channel, integerSize, currentOffset);
+            integerSize.flip();
+            int kSize = integerSize.getInt();
+            currentOffset += Integer.BYTES;
+            integerSize.clear();
 
-                ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-                SafeReadWrite.readFully(fc, keyBytes, currentOffset);
-                keyBytes.flip();
-                currentOffset += kSize;
+            ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
+            SafeReadWrite.readFully(channel, keyBytes, currentOffset);
+            keyBytes.flip();
+            currentOffset += kSize;
 
-                ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
-                SafeReadWrite.readFully(fc, valueSizeBuf, currentOffset);
-                valueSizeBuf.flip();
-                int vSize = valueSizeBuf.getInt();
-                currentOffset += Integer.BYTES;
+            SafeReadWrite.readFully(channel, integerSize, currentOffset);
+            integerSize.flip();
+            int vSize = integerSize.getInt();
+            currentOffset += Integer.BYTES;
+            integerSize.clear();
 
-                int compare = key.compareTo(keyBytes);
-                if (compare == 0) {
-                    ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-                    SafeReadWrite.readFully(fc, valueBytes, currentOffset);
-                    return Optional.of(valueBytes.array());
-                } else if (compare > 0) {
-                    currentOffset += vSize;
-                } else {
-                    break;
-                }
+            int compare = key.compareTo(keyBytes);
+            if (compare == 0) {
+                ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
+                SafeReadWrite.readFully(channel, valueBytes, currentOffset);
+                return Optional.of(valueBytes.array());
+            } else if (compare > 0) {
+                currentOffset += vSize;
+            } else {
+                break;
             }
         }
 
