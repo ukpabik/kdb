@@ -1,8 +1,31 @@
 # KDB
 
-KDB is a highly concurrent, persistent, LSM-tree-backed key-value storage engine implemented from scratch in Java.
+KDB is a fast key-value storage library built upon the LSM tree architecture.
 
-## Performance Benchmarks
+## Features
+* Keys and values are byte arrays of arbitrary size (utilizing ByteBuffers for manipulation).
+* Data is stored in sorted order, by key.
+* Basic Operations include `Get(key)`, `Put(key)`, and `Remove(key)`.
+* `Put` requests can be batched into single, atomic operations.
+
+## Installation
+```bash
+git clone https://github.com/ukpabik/kdb.git
+```
+
+## Testing
+KDB uses Apache Maven as its build system.
+
+```bash
+mvn clean
+mvn test
+```
+
+## Performance
+To run benchmarks on your local machine, use this command below:
+```bash
+mvn exec:java
+```
 
 
 ### Workload Parameters
@@ -11,8 +34,8 @@ KDB is a highly concurrent, persistent, LSM-tree-backed key-value storage engine
 * **Total Operations:** 1,000,000 unique records
 
 ### Throughput Results
-| Operation | Latency per Op | Throughput |
-| :--- | :--- | :--- |
-| `fillrandom` | 3.848 micros/op | 28.7 MB/s |
-| `overwrite` | 4.553 micros/op | 24.3 MB/s |
-| `readrandom` | 257.184 micros/op | 0.4 MB/s |
+| Operation | Latency           | Throughput |
+| :--- |:------------------|:-----------|
+| `fillrandom` | 3.138 micros/op   | 35.3 MB/s  |
+| `overwrite` | 3.462 micros/op   | 32.0 MB/s  |
+| `readrandom` | 173.494 micros/op | 0.6 MB/s   |
