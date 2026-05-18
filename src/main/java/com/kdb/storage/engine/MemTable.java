@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.kdb.storage.common.Serializer.calculateSize;
 import static com.kdb.storage.engine.PersistentStore.TOMBSTONE;
 
 /**
@@ -25,8 +26,6 @@ import static com.kdb.storage.engine.PersistentStore.TOMBSTONE;
  */
 final class MemTable implements Store<ByteBuffer, byte[]> {
 
-    // Estimate for JVM overhead per map entry.
-    private static final int ESTIMATED_OVERHEAD_BYTES = 64;
 
     private final ConcurrentSkipListMap<ByteBuffer, byte[]> map;
     private final AtomicLong currentSizeInBytes;
@@ -110,12 +109,6 @@ final class MemTable implements Store<ByteBuffer, byte[]> {
         this.map.clear();
     }
 
-    /**
-     * Helper function to calculate the size of a stored entry.
-     */
-    private long calculateSize(ByteBuffer key, byte[] value) {
-        return key.remaining() + value.length + ESTIMATED_OVERHEAD_BYTES;
-    }
 
     @Override
     public void close() {

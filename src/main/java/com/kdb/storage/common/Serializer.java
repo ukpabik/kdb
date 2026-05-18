@@ -3,6 +3,7 @@ package com.kdb.storage.common;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
+
 /**
  * A serialization helper providing the fundamental layout serialization format
  * for all disk-bound data blocks within KDB.
@@ -20,6 +21,8 @@ import java.util.Objects;
  * </pre>
  */
 public abstract class Serializer {
+    // Estimate for JVM overhead per map entry.
+    private static final int ESTIMATED_OVERHEAD_BYTES = 64;
 
     /**
      * Serializes a variable-length key and value into a single, self-contained {@link ByteBuffer}.
@@ -78,5 +81,15 @@ public abstract class Serializer {
         ByteBuffer valueBuffer = ByteBuffer.allocate(Long.BYTES).putLong(offset);
         valueBuffer.flip();
         return serialize(key, valueBuffer);
+    }
+
+    /**
+     * Calculates the combined size of an entry key and value.
+     * @param key The key whose size is to be calculated.
+     * @param value The value whose size is to be calculated.
+     * @return The total size of the combined entry.
+     */
+    public static long calculateSize(ByteBuffer key, byte[] value) {
+        return key.remaining() + value.length + ESTIMATED_OVERHEAD_BYTES;
     }
 }
