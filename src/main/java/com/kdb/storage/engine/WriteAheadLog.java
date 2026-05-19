@@ -147,6 +147,15 @@ public final class WriteAheadLog implements AutoCloseable {
             channel.force(true);
             channel.close();
         }
+
+        try {
+            if (!this.syncService.awaitTermination(20, TimeUnit.SECONDS)) {
+                this.syncService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            this.syncService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     Path path() {
