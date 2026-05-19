@@ -12,6 +12,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -136,47 +137,25 @@ final class SSTableManager implements Closeable {
                 throw new CorruptFileException("This SST file is corrupted.");
             }
 
-            long currentOffset = indexOffset;
-            long bytesReadFromIndex = 0;
-            ByteBuffer integerSize = ByteBuffer.allocate(Integer.BYTES);
+            MappedByteBuffer indexBuf = fc.map(FileChannel.MapMode.READ_ONLY, indexOffset, indexSize);
 
-            while (bytesReadFromIndex < indexSize) {
-                SafeReadWrite.readFully(fc, integerSize, currentOffset);
-                integerSize.flip();
-                int kSize = integerSize.getInt();
-                integerSize.clear();
+            while (indexBuf.hasRemaining()) {
+                int kSize = indexBuf.getInt();
 
+                ByteBuffer keyBytes = indexBuf.slice();
+                keyBytes.limit(kSize);
 
-                currentOffset += Integer.BYTES;
-                bytesReadFromIndex += Integer.BYTES;
+                indexBuf.position(indexBuf.position() + kSize);
 
-                ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-                SafeReadWrite.readFully(fc, keyBytes, currentOffset);
-                keyBytes.flip();
+                int vSize = indexBuf.getInt();
 
-                currentOffset += kSize;
-                bytesReadFromIndex += kSize;
+                ByteBuffer valueBytes = indexBuf.slice();
+                valueBytes.limit(vSize);
 
-                SafeReadWrite.readFully(fc, integerSize, currentOffset);
-                integerSize.flip();
-                int vSize = integerSize.getInt();
-                integerSize.clear();
+                indexBuf.position(indexBuf.position() + vSize);
 
-                currentOffset += Integer.BYTES;
-                bytesReadFromIndex += Integer.BYTES;
-
-                ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-                SafeReadWrite.readFully(fc, valueBytes, currentOffset);
-                valueBytes.flip();
-
-                currentOffset += vSize;
-                bytesReadFromIndex += vSize;
-
-                ByteBuffer keyToStore = ByteBuffer.allocate(keyBytes.remaining());
-                keyToStore.put(keyBytes);
-                keyToStore.flip();
-
-                indexMap.put(keyToStore, valueBytes.getLong());
+                long mapValue = valueBytes.getLong();
+                indexMap.put(keyBytes.duplicate(), mapValue);
             }
 
             long bloomSize = footerOffset - bloomOffset;
