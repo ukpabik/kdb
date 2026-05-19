@@ -69,14 +69,15 @@ class SSTableIntegrationTest {
 
         SSTable table = manager.tables().getFirst();
 
-        try (SSTableIterator iterator = (SSTableIterator) table.iterator()) {
-            assertTrue(iterator.hasNext());
-            KVPair pair = iterator.next();
+        SSTableIterator iterator = (SSTableIterator) table.iterator();
+        assertTrue(iterator.hasNext());
+        KVPair pair = iterator.next();
 
-            assertEquals(k1, pair.key());
-            assertArrayEquals(v1, pair.value().array());
+        assertEquals(k1, pair.key());
+        byte[] valueBytes = new byte[pair.value().remaining()];
+        pair.value().get(valueBytes);
+        assertArrayEquals(v1, valueBytes);
 
-            assertFalse(iterator.hasNext());
-        }
+        assertFalse(iterator.hasNext());
     }
 }
