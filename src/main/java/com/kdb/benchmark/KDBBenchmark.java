@@ -52,6 +52,7 @@ public class KDBBenchmark {
         } finally {
             cleanDirectory(dbDirectory);
         }
+        System.exit(0);
     }
 
     /**
