@@ -27,6 +27,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import static com.kdb.storage.common.FileSystemConstants.TOMBSTONE;
 import static com.kdb.storage.common.Serializer.calculateSize;
 
 /**
@@ -66,7 +67,6 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
     private final ExecutorService compactService;
     private final ReadWriteLock lock;
 
-    static final byte[] TOMBSTONE = new byte[0];
 
     // 64 MB flush capacity
     private static final int FLUSH_CAPACITY = 64_000_000;

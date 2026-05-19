@@ -12,7 +12,11 @@ import java.nio.channels.FileChannel;
  * @see com.kdb.storage.engine.SSTableWriter
  * @see com.kdb.storage.engine.SSTableManager
  */
-public abstract class SafeReadWrite {
+public final class SafeReadWrite {
+
+    private SafeReadWrite() {
+        throw new AssertionError("This class should not be instantiated");
+    }
 
     public static void writeFully(FileChannel fc, ByteBuffer buf) throws IOException {
         while (buf.hasRemaining()) {

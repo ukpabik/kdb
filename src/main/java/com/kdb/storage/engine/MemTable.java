@@ -9,8 +9,8 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.kdb.storage.common.FileSystemConstants.TOMBSTONE;
 import static com.kdb.storage.common.Serializer.calculateSize;
-import static com.kdb.storage.engine.PersistentStore.TOMBSTONE;
 
 /**
  * A high-performance, thread-safe implementation of {@link Store} that

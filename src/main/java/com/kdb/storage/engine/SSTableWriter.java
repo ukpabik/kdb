@@ -15,8 +15,8 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.*;
 
+import static com.kdb.storage.common.FileSystemConstants.*;
 import static com.kdb.storage.common.Serializer.serialize;
-import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
 import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.StandardOpenOption.CREATE;
 
@@ -48,16 +48,11 @@ final class SSTableWriter {
     private static final String SST_FILE_EXT = ".sst";
     private static final int SST_FILENAME_SIZE = 32;
 
-    // 64KB Pages
-    private static final int PAGE_BUFFER_SIZE = 64 * 1024;
     private final Path directoryPath;
 
-    // Index for every 100 keys
-    static final int INDEX_SEGMENT = 100;
 
     private final Random rand = new Random();
 
-    static final int INDEX_BUFFER_LENGTH = 28;
 
 
     /**

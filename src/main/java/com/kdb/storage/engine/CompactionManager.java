@@ -15,10 +15,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 
+import static com.kdb.storage.common.FileSystemConstants.INDEX_BUFFER_LENGTH;
+import static com.kdb.storage.common.FileSystemConstants.INDEX_SEGMENT;
+import static com.kdb.storage.common.FileSystemConstants.MAGIC_NUMBER;
 import static com.kdb.storage.common.Serializer.serialize;
-import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
-import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
-import static com.kdb.storage.engine.SSTableWriter.INDEX_SEGMENT;
 import static java.nio.file.StandardOpenOption.*;
 
 /**

@@ -3,8 +3,6 @@ package com.kdb.storage.engine;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.hash.BloomFilter;
 import com.kdb.storage.common.KVPair;
-import com.kdb.storage.common.SafeReadWrite;
-import com.kdb.storage.exceptions.StorageException;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -17,8 +15,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-
-import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
 
 /**
  * A read-only, on-disk data structure providing efficient key-value lookups.
@@ -37,8 +33,6 @@ import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
  */
 final class SSTable implements Closeable {
 
-    // Used for indicating a file is a .sst file.
-    static final int MAGIC_NUMBER = 0x4B444249;
 
     private final Path filePath;
     private final ImmutableSortedMap<ByteBuffer, Long> sparseIndex;

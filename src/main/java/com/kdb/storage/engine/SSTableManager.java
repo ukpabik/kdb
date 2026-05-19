@@ -22,8 +22,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.kdb.storage.engine.SSTable.MAGIC_NUMBER;
-import static com.kdb.storage.engine.SSTableWriter.INDEX_BUFFER_LENGTH;
+import static com.kdb.storage.common.FileSystemConstants.INDEX_BUFFER_LENGTH;
+import static com.kdb.storage.common.FileSystemConstants.MAGIC_NUMBER;
 
 /**
  * Orchestrates the lifestyle and logic for all {@link SSTable} instances.
