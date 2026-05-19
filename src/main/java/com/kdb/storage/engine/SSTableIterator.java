@@ -31,20 +31,19 @@ import java.util.NoSuchElementException;
  * @see KVPair
  */
 
-final class SSTableIterator implements Iterator<KVPair>, AutoCloseable {
-    private final FileChannel readChannel;
+final class SSTableIterator implements Iterator<KVPair>{
     private final long fileReadLimit;
-    private long currentOffset = 0;
+    private final ByteBuffer buffer;
 
     SSTableIterator(SSTable table, long fileLimit) throws IOException {
-        Path filePath = table.path();
-        readChannel = FileChannel.open(filePath, StandardOpenOption.READ);
+        this.buffer = table.dataBuffer();
         fileReadLimit = fileLimit;
+        this.buffer.position(0);
     }
 
     @Override
     public boolean hasNext() {
-        return this.currentOffset < fileReadLimit;
+        return this.buffer.position() < fileReadLimit;
     }
 
     /**
@@ -59,40 +58,19 @@ final class SSTableIterator implements Iterator<KVPair>, AutoCloseable {
         if (!hasNext()) {
             throw new NoSuchElementException("No more elements left in iterator.");
         }
-        try {
 
-            ByteBuffer keySizeBuf = ByteBuffer.allocate(Integer.BYTES);
-            SafeReadWrite.readFully(this.readChannel, keySizeBuf, currentOffset);
-            keySizeBuf.flip();
-            int kSize = keySizeBuf.getInt();
-            currentOffset += Integer.BYTES;
+        int kSize = buffer.getInt();
 
-            ByteBuffer keyBytes = ByteBuffer.allocate(kSize);
-            SafeReadWrite.readFully(this.readChannel, keyBytes, currentOffset);
-            keyBytes.flip();
-            currentOffset += kSize;
+        ByteBuffer keyBytes = buffer.slice();
+        keyBytes.limit(kSize);
+        buffer.position(buffer.position() + kSize);
 
-            ByteBuffer valueSizeBuf = ByteBuffer.allocate(Integer.BYTES);
-            SafeReadWrite.readFully(this.readChannel, valueSizeBuf, currentOffset);
-            valueSizeBuf.flip();
-            int vSize = valueSizeBuf.getInt();
-            currentOffset += Integer.BYTES;
+        int vSize = buffer.getInt();
 
-            ByteBuffer valueBytes = ByteBuffer.allocate(vSize);
-            SafeReadWrite.readFully(this.readChannel, valueBytes, currentOffset);
-            valueBytes.flip();
-            currentOffset += vSize;
+        ByteBuffer valueBytes = buffer.slice();
+        valueBytes.limit(vSize);
+        buffer.position(buffer.position() + vSize);
 
-            return new KVPair(keySizeBuf, keyBytes, valueSizeBuf, valueBytes);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void close() throws Exception {
-        if (this.readChannel.isOpen()) {
-            this.readChannel.close();
-        }
+        return new KVPair(keyBytes, valueBytes);
     }
 }
