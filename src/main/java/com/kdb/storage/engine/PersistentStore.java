@@ -18,7 +18,6 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -32,7 +31,7 @@ import static com.kdb.storage.common.Serializer.calculateSize;
 
 /**
  * A high-performance, thread-safe, persistent key-value store implementing an LSM-Tree architecture.
- *
+ * <p>
  * It coordinates a volatile in-memory layer ({@link MemTable}) with a crash-resilient write-ahead log ({@link WriteAheadLog})
  * and an immutable on-disk storage tier of Sorted String Tables ({@link SSTable}) to optimize write-heavy workloads.
  *
@@ -121,7 +120,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
             ByteBuffer searchKey = key.duplicate();
             byte[] cachedValue = memCache.getIfPresent(searchKey);
             if (cachedValue != null) {
-               return cachedValue == TOMBSTONE ? Optional.empty() : Optional.of(cachedValue);
+                return cachedValue == TOMBSTONE ? Optional.empty() : Optional.of(cachedValue);
             }
 
             Optional<byte[]> result = lookupInStorage(searchKey);
@@ -414,20 +413,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
     @Override
     public void close() {
-        this.flushService.shutdown();
-        this.compactService.shutdown();
-        try {
-            if (!this.flushService.awaitTermination(20, TimeUnit.SECONDS)) {
-                this.flushService.shutdownNow();
-            }
-            if (!this.compactService.awaitTermination(20, TimeUnit.SECONDS)) {
-                this.compactService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            this.compactService.shutdownNow();
-            this.flushService.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        this.compactService.shutdownNow();
+        this.flushService.shutdownNow();
 
         try {
             if (activeLog != null) {

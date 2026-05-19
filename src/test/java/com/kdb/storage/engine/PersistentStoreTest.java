@@ -52,11 +52,11 @@ class PersistentStoreTest {
 
         this.currentStore.put(key, value);
 
-        Store<ByteBuffer, byte[]> store2 = StorageEngines.createPersistentStore(tempDir);
-
-        Optional<byte[]> result = store2.get(key);
-        assertTrue(result.isPresent(), "Data must survive a system restart");
-        assertArrayEquals(value, result.get(), "Recovered data must match the original input perfectly");
+        try(Store<ByteBuffer, byte[]> store2 = StorageEngines.createPersistentStore(tempDir)) {
+            Optional<byte[]> result = store2.get(key);
+            assertTrue(result.isPresent(), "Data must survive a system restart");
+            assertArrayEquals(value, result.get(), "Recovered data must match the original input perfectly");
+        }
     }
 
     @Test
@@ -70,9 +70,9 @@ class PersistentStoreTest {
 
         assertTrue(currentStore.get(key).isEmpty(), "MemTable should immediately hide deleted keys via tombstone");
 
-        Store<ByteBuffer, byte[]> store2 = StorageEngines.createPersistentStore(tempDir);
-
-        assertTrue(store2.get(key).isEmpty(), "Tombstone must be replayed from WAL to keep data deleted post-crash");
+        try(Store<ByteBuffer, byte[]> store2 = StorageEngines.createPersistentStore(tempDir)){
+            assertTrue(store2.get(key).isEmpty(), "Tombstone must be replayed from WAL to keep data deleted post-crash");
+        }
     }
 
     @Test

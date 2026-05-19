@@ -14,7 +14,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -147,15 +146,7 @@ public final class WriteAheadLog implements AutoCloseable {
             channel.force(true);
             channel.close();
         }
-
-        try {
-            if (!this.syncService.awaitTermination(20, TimeUnit.SECONDS)) {
-                this.syncService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            this.syncService.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        this.syncService.shutdownNow();
     }
 
     Path path() {
