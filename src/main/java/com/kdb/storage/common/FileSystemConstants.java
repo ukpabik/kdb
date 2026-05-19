@@ -5,6 +5,11 @@ package com.kdb.storage.common;
  * This utility class holds global constants used during file I/O operations.
  */
 public final class FileSystemConstants {
+
+    private FileSystemConstants() {
+        throw new AssertionError("This class should not be instantiated");
+    }
+
     public static final byte[] TOMBSTONE = new byte[0];
 
     // Used for indicating a file is a .sst file.
