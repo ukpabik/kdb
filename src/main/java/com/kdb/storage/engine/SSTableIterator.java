@@ -32,18 +32,19 @@ import java.util.NoSuchElementException;
  */
 
 final class SSTableIterator implements Iterator<KVPair>{
+    private final FileChannel channel;
     private final long fileReadLimit;
-    private final ByteBuffer buffer;
+    private long currentPosition;
 
     SSTableIterator(SSTable table, long fileLimit) throws IOException {
-        this.buffer = table.dataBuffer();
+        this.channel = table.channel();
         fileReadLimit = fileLimit;
-        this.buffer.position(0);
+        this.currentPosition = 0;
     }
 
     @Override
     public boolean hasNext() {
-        return this.buffer.position() < fileReadLimit;
+        return currentPosition < fileReadLimit;
     }
 
     /**
@@ -55,22 +56,38 @@ final class SSTableIterator implements Iterator<KVPair>{
      */
     @Override
     public KVPair next() {
-        if (!hasNext()) {
-            throw new NoSuchElementException("No more elements left in iterator.");
+        if (!hasNext()) throw new NoSuchElementException();
+
+        try {
+            // Read key size
+            ByteBuffer sizeBuf = ByteBuffer.allocate(Integer.BYTES);
+            channel.read(sizeBuf, currentPosition);
+            sizeBuf.flip();
+            int kSize = sizeBuf.getInt();
+            currentPosition += Integer.BYTES;
+
+            // Read key
+            ByteBuffer keyBuf = ByteBuffer.allocate(kSize);
+            channel.read(keyBuf, currentPosition);
+            keyBuf.flip();
+            currentPosition += kSize;
+
+            // Read value size
+            sizeBuf.clear();
+            channel.read(sizeBuf, currentPosition);
+            sizeBuf.flip();
+            int vSize = sizeBuf.getInt();
+            currentPosition += Integer.BYTES;
+
+            // Read value
+            ByteBuffer valBuf = ByteBuffer.allocate(vSize);
+            channel.read(valBuf, currentPosition);
+            valBuf.flip();
+            currentPosition += vSize;
+
+            return new KVPair(keyBuf, valBuf);
+        } catch (IOException e) {
+            throw new RuntimeException("IO error during iteration", e);
         }
-
-        int kSize = buffer.getInt();
-
-        ByteBuffer keyBytes = buffer.slice();
-        keyBytes.limit(kSize);
-        buffer.position(buffer.position() + kSize);
-
-        int vSize = buffer.getInt();
-
-        ByteBuffer valueBytes = buffer.slice();
-        valueBytes.limit(vSize);
-        buffer.position(buffer.position() + vSize);
-
-        return new KVPair(keyBytes, valueBytes);
     }
 }

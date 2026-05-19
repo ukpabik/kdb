@@ -41,7 +41,6 @@ final class SSTable implements Closeable {
 
     private final BloomFilter<byte[]> bloomFilter;
     private final FileChannel channel;
-    private final MappedByteBuffer dataBuffer;
 
 
     SSTable(Path path, Map<ByteBuffer, Long> index, long indexOffset, long sequenceNumber, BloomFilter<byte[]> filter) throws IOException {
@@ -53,7 +52,6 @@ final class SSTable implements Closeable {
         this.sequenceNumber = sequenceNumber;
         this.bloomFilter = filter;
         this.channel = FileChannel.open(filePath, StandardOpenOption.READ);
-        this.dataBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, indexOffset);
     }
 
     /**
@@ -61,6 +59,10 @@ final class SSTable implements Closeable {
      */
     Path path() {
         return this.filePath;
+    }
+
+    FileChannel channel() {
+        return this.channel;
     }
 
     long sequenceNumber() {
@@ -88,31 +90,39 @@ final class SSTable implements Closeable {
         Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
         int currentOffset = (indexEntry == null) ? 0 : indexEntry.getValue().intValue();
 
+        ByteBuffer sizeBuf = ByteBuffer.allocate(Integer.BYTES);
+
         while (currentOffset < this.indexOffset) {
-            int kSize = dataBuffer.getInt(currentOffset);
-            currentOffset += Integer.BYTES;
+            sizeBuf.clear();
+            channel.read(sizeBuf, currentOffset);
+            sizeBuf.flip();
+            int kSize = sizeBuf.getInt();
 
-            dataBuffer.position(currentOffset);
-            ByteBuffer keyBytes = dataBuffer.slice();
-            keyBytes.limit(kSize);
-            currentOffset += kSize;
+            ByteBuffer keyBuf = ByteBuffer.allocate(kSize);
+            channel.read(keyBuf, currentOffset + Integer.BYTES);
+            keyBuf.flip();
 
-            int vSize = dataBuffer.getInt(currentOffset);
-            currentOffset += Integer.BYTES;
+            int compare = key.compareTo(keyBuf);
 
-            int compare = key.compareTo(keyBytes);
             if (compare == 0) {
+                sizeBuf.clear();
+                channel.read(sizeBuf, currentOffset + Integer.BYTES + kSize);
+                sizeBuf.flip();
+                int vSize = sizeBuf.getInt();
+
                 byte[] valueBytes = new byte[vSize];
-                dataBuffer.position(currentOffset);
-                dataBuffer.get(valueBytes);
+                channel.read(ByteBuffer.wrap(valueBytes), currentOffset + Integer.BYTES + kSize + Integer.BYTES);
                 return Optional.of(valueBytes);
             } else if (compare > 0) {
-                currentOffset += vSize;
+                sizeBuf.clear();
+                channel.read(sizeBuf, currentOffset + Integer.BYTES + kSize);
+                sizeBuf.flip();
+                int vSize = sizeBuf.getInt();
+                currentOffset += Integer.BYTES + kSize + Integer.BYTES + vSize;
             } else {
                 break;
             }
         }
-
         return Optional.empty();
     }
 
@@ -122,13 +132,6 @@ final class SSTable implements Closeable {
      */
     Iterator<KVPair> iterator() throws IOException {
         return new SSTableIterator(this, indexOffset);
-    }
-
-    /**
-     * @return A duplicate of the current data buffer.
-     */
-    MappedByteBuffer dataBuffer() {
-        return this.dataBuffer.duplicate();
     }
 
     @Override
