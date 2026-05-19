@@ -6,6 +6,7 @@ import com.google.common.hash.Funnels;
 import com.kdb.storage.common.SafeReadWrite;
 import com.kdb.storage.exceptions.CorruptFileException;
 import com.kdb.storage.exceptions.StorageException;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.ByteArrayInputStream;
 import java.io.Closeable;
@@ -30,6 +31,8 @@ import static com.kdb.storage.common.FileSystemConstants.MAGIC_NUMBER;
  *
  * @see SSTable
  */
+
+@Slf4j
 final class SSTableManager implements Closeable {
 
     private final Path directoryPath;
@@ -58,8 +61,8 @@ final class SSTableManager implements Closeable {
                     return result;
                 }
             } catch (IOException e) {
+                log.error("Error while searching SSTable {}", table.sequenceNumber());
                 throw new StorageException("Error while searching", e);
-                // TODO: Log error
             }
         }
         return Optional.empty();
@@ -115,6 +118,9 @@ final class SSTableManager implements Closeable {
      * @throws CorruptFileException If the magic number is missing or file is corrupted.
      */
     private SSTable load(Path sstPath) throws IOException {
+        long startTime = System.currentTimeMillis();
+        log.info("Starting load process for {}", sstPath);
+
         TreeMap<ByteBuffer, Long> indexMap = new TreeMap<>();
         long indexOffset;
         long sequenceNumber = extractSequenceNumber(sstPath.getFileName().toString());
@@ -134,6 +140,7 @@ final class SSTableManager implements Closeable {
             int magicNumber = footerBytes.getInt();
 
             if (magicNumber != MAGIC_NUMBER) {
+                log.error("Attempt to load a corrupted SST file {}", sstPath);
                 throw new CorruptFileException("This SST file is corrupted.");
             }
 
@@ -169,6 +176,8 @@ final class SSTableManager implements Closeable {
             }
         }
 
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Successfully loaded {} in {} ms", sstPath, duration);
         return new SSTable(sstPath, indexMap, indexOffset, sequenceNumber, bloomFilter);
     }
 
@@ -188,7 +197,7 @@ final class SSTableManager implements Closeable {
                 try {
                     Files.deleteIfExists(table.path());
                 } catch (IOException e) {
-                    // TODO: Log this
+                    log.error("Error deleting SSTable {}", table.sequenceNumber());
                 }
             }
         }
@@ -201,8 +210,8 @@ final class SSTableManager implements Closeable {
         try {
             Files.deleteIfExists(path);
         } catch (IOException e) {
+            log.error("Error deleting file: {}", path.toString());
             throw new StorageException("Error deleting corrupt file", e);
-            // TODO: Log this??
         }
     }
 

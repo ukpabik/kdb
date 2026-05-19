@@ -4,6 +4,7 @@ import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import com.kdb.storage.common.KVPair;
 import com.kdb.storage.common.SafeReadWrite;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -30,6 +31,8 @@ import static java.nio.file.StandardOpenOption.*;
  * @see SSTable
  * @see SSTableIterator
  */
+
+@Slf4j
 final class CompactionManager {
     private final Path directory;
 
@@ -57,6 +60,9 @@ final class CompactionManager {
      * @throws IOException In case of file read error.
      */
     SSTable compact(List<SSTable> immutableTableList) throws IOException {
+        int listSize = immutableTableList.size();
+        log.info("Beginning compaction for {} SSTables", listSize);
+        long startTime = System.currentTimeMillis();
         ByteBuffer lastWrittenKey = null;
         boolean isFirstKey = true;
         Path compactionFile = directory.resolve("tmpCompactFile.tmp");
@@ -158,6 +164,8 @@ final class CompactionManager {
             SafeReadWrite.writeFully(fc, indexBuffer);
             fc.force(true);
             Files.move(compactionFile, newPath, StandardCopyOption.REPLACE_EXISTING);
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("Successfully compacted {} SSTables to {} in {} ms", listSize, newPath, duration);
             return new SSTable(newPath, indexMap, indexOffset, immutableTableList.getLast().sequenceNumber(), bloomFilter);
         }
     }

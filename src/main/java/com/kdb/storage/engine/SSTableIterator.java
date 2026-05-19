@@ -2,6 +2,7 @@ package com.kdb.storage.engine;
 
 import com.kdb.storage.common.KVPair;
 import com.kdb.storage.common.SafeReadWrite;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -31,6 +32,7 @@ import java.util.NoSuchElementException;
  * @see KVPair
  */
 
+@Slf4j
 final class SSTableIterator implements Iterator<KVPair>{
     private final FileChannel channel;
     private final long fileReadLimit;
@@ -83,6 +85,7 @@ final class SSTableIterator implements Iterator<KVPair>{
 
             return new KVPair(keyBuf, valBuf);
         } catch (IOException e) {
+            log.error("IO error during iteration", e);
             throw new RuntimeException("IO error during iteration", e);
         }
     }

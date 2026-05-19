@@ -8,6 +8,7 @@ import com.google.common.collect.ImmutableMap;
 import com.kdb.storage.Store;
 import com.kdb.storage.common.OpCode;
 import com.kdb.storage.exceptions.StorageException;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 
 import java.io.Closeable;
@@ -49,6 +50,7 @@ import static com.kdb.storage.common.Serializer.calculateSize;
  * @since 1.0
  */
 
+@Slf4j
 final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
     private volatile Store<ByteBuffer, byte[]> activeMemTable;
@@ -150,6 +152,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
                 triggerFlush();
             }
         } catch (IOException e) {
+            log.error("Failed to persist data to WAL after put()", e);
             throw new StorageException("Failed to persist data to WAL", e);
         } finally {
             lock.readLock().unlock();
@@ -172,6 +175,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
             activeMemTable.put(key.duplicate(), TOMBSTONE);
             return previousValue;
         } catch (IOException e) {
+            log.error("Failed to persist data to WAL after remove()", e);
             throw new StorageException("Failed to persist data to WAL", e);
         } finally {
             lock.readLock().unlock();
@@ -242,7 +246,9 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
         long currentSeqNum;
         WriteAheadLog oldLog;
 
+
         lock.writeLock().lock();
+        long startTime = System.currentTimeMillis();
         try {
             if (this.inactiveMemTable != null) return;
             this.inactiveMemTable = this.activeMemTable;
@@ -250,6 +256,8 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
             tableToFlush = (MemTable) this.inactiveMemTable;
             currentSeqNum = sstSequenceNumber.getAndIncrement();
+
+            log.info("Starting background flush for MemTable with sequence number: {}", currentSeqNum);
 
             oldLog = rotateLog();
 
@@ -268,6 +276,11 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
             } finally {
                 lock.writeLock().unlock();
             }
+
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("Successfully flushed MemTable to {} in {} ms", newSSTPath, duration);
+        } catch (Exception e){
+            log.error("Critical error during background MemTable flush for sequence: {}", currentSeqNum);
         } finally {
             this.inactiveMemTable = null;
             deleteLog(oldLog);
@@ -385,15 +398,14 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
      * Deletes the old log.
      *
      * @param oldLog The old log to be deleted.
-     * @throws IOException In the event of a file read error.
      */
-    private void deleteLog(WriteAheadLog oldLog) throws IOException {
+    private void deleteLog(WriteAheadLog oldLog) {
         if (oldLog != null) {
             try {
                 oldLog.close();
                 Files.deleteIfExists(oldLog.path());
             } catch (IOException e) {
-                // TODO: Log this
+               log.error("Error deleting old log", e);
             }
         }
     }
@@ -423,7 +435,7 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
             this.tableManager.close();
         } catch (IOException e) {
-            // TODO: Log this error
+            log.error("Error closing PersistentStore instance", e);
         }
     }
 }

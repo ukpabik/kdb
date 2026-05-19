@@ -6,6 +6,7 @@ import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import com.kdb.storage.common.SafeReadWrite;
 import com.kdb.storage.exceptions.StorageException;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -43,6 +44,8 @@ import static java.nio.file.StandardOpenOption.CREATE;
  *
  * @see PersistentStore
  */
+
+@Slf4j
 final class SSTableWriter {
 
     private static final String SST_FILE_EXT = ".sst";
@@ -156,6 +159,7 @@ final class SSTableWriter {
             fc.force(true);
             return filePath;
         } catch (IOException e) {
+            log.error("Error writing MemTable {} to file", sequenceNumber);
             throw new StorageException("Failed to write MemTable to file", e);
         }
     }

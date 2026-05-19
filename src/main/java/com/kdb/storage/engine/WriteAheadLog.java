@@ -3,6 +3,7 @@ package com.kdb.storage.engine;
 import com.kdb.storage.common.OpCode;
 import com.kdb.storage.common.SafeReadWrite;
 import com.kdb.storage.exceptions.StorageException;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -30,6 +31,8 @@ import java.util.function.Consumer;
  *
  * @see com.kdb.storage.engine.StorageEngines#createPersistentStore(Path)
  */
+
+@Slf4j
 public final class WriteAheadLog implements AutoCloseable {
     private final Path filePath;
     private final FileChannel channel;
@@ -50,7 +53,7 @@ public final class WriteAheadLog implements AutoCloseable {
                     channel.force(true);
                 }
             } catch (IOException e) {
-                // TODO: Log this?
+                log.error("Error syncing log to disk", e);
             }
         }, 50, 50, TimeUnit.MILLISECONDS);
     }
