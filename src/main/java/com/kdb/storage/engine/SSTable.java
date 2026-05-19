@@ -87,38 +87,34 @@ final class SSTable implements Closeable {
             return Optional.empty();
         }
 
-        Map.Entry<ByteBuffer, Long> indexEntry = this.sparseIndex.floorEntry(key);
-        int currentOffset = (indexEntry == null) ? 0 : indexEntry.getValue().intValue();
+        Map.Entry<ByteBuffer, Long> startEntry = this.sparseIndex.floorEntry(key);
+        long startOffset = (startEntry == null) ? 0L : startEntry.getValue();
 
-        ByteBuffer sizeBuf = ByteBuffer.allocate(Integer.BYTES);
+        Map.Entry<ByteBuffer, Long> endEntry = this.sparseIndex.higherEntry(key);
+        long endOffset = (endEntry == null) ? this.indexOffset : endEntry.getValue();
 
-        while (currentOffset < this.indexOffset) {
-            sizeBuf.clear();
-            channel.read(sizeBuf, currentOffset);
-            sizeBuf.flip();
-            int kSize = sizeBuf.getInt();
+        int bytesToRead = (int) (endOffset - startOffset);
+        ByteBuffer segmentBuffer = ByteBuffer.allocate(bytesToRead);
 
-            ByteBuffer keyBuf = ByteBuffer.allocate(kSize);
-            channel.read(keyBuf, currentOffset + Integer.BYTES);
-            keyBuf.flip();
+        channel.read(segmentBuffer, startOffset);
+        segmentBuffer.flip();
 
-            int compare = key.compareTo(keyBuf);
+        while (segmentBuffer.hasRemaining()) {
+            int kSize = segmentBuffer.getInt();
 
+            ByteBuffer keyBytes = segmentBuffer.slice();
+            keyBytes.limit(kSize);
+            segmentBuffer.position(segmentBuffer.position() + kSize);
+
+            int vSize = segmentBuffer.getInt();
+
+            int compare = key.compareTo(keyBytes);
             if (compare == 0) {
-                sizeBuf.clear();
-                channel.read(sizeBuf, currentOffset + Integer.BYTES + kSize);
-                sizeBuf.flip();
-                int vSize = sizeBuf.getInt();
-
                 byte[] valueBytes = new byte[vSize];
-                channel.read(ByteBuffer.wrap(valueBytes), currentOffset + Integer.BYTES + kSize + Integer.BYTES);
+                segmentBuffer.get(valueBytes);
                 return Optional.of(valueBytes);
             } else if (compare > 0) {
-                sizeBuf.clear();
-                channel.read(sizeBuf, currentOffset + Integer.BYTES + kSize);
-                sizeBuf.flip();
-                int vSize = sizeBuf.getInt();
-                currentOffset += Integer.BYTES + kSize + Integer.BYTES + vSize;
+                segmentBuffer.position(segmentBuffer.position() + vSize);
             } else {
                 break;
             }

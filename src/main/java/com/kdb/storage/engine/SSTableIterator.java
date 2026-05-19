@@ -59,27 +59,23 @@ final class SSTableIterator implements Iterator<KVPair>{
         if (!hasNext()) throw new NoSuchElementException();
 
         try {
-            // Read key size
             ByteBuffer sizeBuf = ByteBuffer.allocate(Integer.BYTES);
             channel.read(sizeBuf, currentPosition);
             sizeBuf.flip();
             int kSize = sizeBuf.getInt();
             currentPosition += Integer.BYTES;
 
-            // Read key
             ByteBuffer keyBuf = ByteBuffer.allocate(kSize);
             channel.read(keyBuf, currentPosition);
             keyBuf.flip();
             currentPosition += kSize;
 
-            // Read value size
             sizeBuf.clear();
             channel.read(sizeBuf, currentPosition);
             sizeBuf.flip();
             int vSize = sizeBuf.getInt();
             currentPosition += Integer.BYTES;
 
-            // Read value
             ByteBuffer valBuf = ByteBuffer.allocate(vSize);
             channel.read(valBuf, currentPosition);
             valBuf.flip();

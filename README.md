@@ -33,9 +33,9 @@ mvn exec:java
 * **Value Size:** 100 bytes each
 * **Total Operations:** 1,000,000 unique records
 
-### Throughput Results
-| Operation | Latency         | Throughput |
-| :--- |:----------------|:-----------|
-| `fillrandom` | 3.978 micros/op | 27.8 MB/s  |
-| `overwrite` | 3.959 micros/op | 27.9 MB/s  |
-| `readrandom` | 3.555 micros/op | 31.1 MB/s  |
+### p99 Results
+| Operation | Latency          | Throughput |
+| :--- |:-----------------|:-----------|
+| `fillrandom` | 9.000 micros/op  | 27.0 MB/s  |
+| `overwrite` | 9.800 micros/op  | 26.2 MB/s  |
+| `readrandom` | 25.400 micros/op | 11.4 MB/s  |

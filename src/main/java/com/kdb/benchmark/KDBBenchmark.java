@@ -42,13 +42,13 @@ public class KDBBenchmark {
         Path dbDirectory = Files.createTempDirectory("kdb_bench_rand_");
         try (Store<ByteBuffer, byte[]> store = StorageEngines.createPersistentStore(dbDirectory)) {
 
-            runBenchmark("fillrandom", store, keys, payload, NUM_OPERATIONS, true);
+            runP99Benchmark("fillrandom", store, keys, payload, NUM_OPERATIONS, true);
 
             shuffleArray(keys);
-            runBenchmark("overwrite", store, keys, payload, NUM_OPERATIONS, true);
+            runP99Benchmark("overwrite", store, keys, payload, NUM_OPERATIONS, true);
 
             shuffleArray(keys);
-            runBenchmark("readrandom", store, keys, null, NUM_OPERATIONS, false);
+            runP99Benchmark("readrandom", store, keys, null, NUM_OPERATIONS, false);
         } finally {
             cleanDirectory(dbDirectory);
         }
@@ -87,6 +87,37 @@ public class KDBBenchmark {
         } else {
             System.out.printf("%-12s : %11.3f micros/op; %6.1f MB/s (Found: %,d)\n", name, microsPerOp, mbPerSec, foundCount);
         }
+    }
+
+    /**
+     * Used to track p99 latencies.
+     */
+    private static void runP99Benchmark(String name, Store<ByteBuffer, byte[]> store, ByteBuffer[] keys, byte[] payload, int ops, boolean isWrite) {
+        long[] latencies = new long[ops];
+        long startTime = System.nanoTime();
+
+        for (int i = 0; i < ops; i++) {
+            ByteBuffer key = keys[i];
+            key.clear();
+
+            long start = System.nanoTime();
+            if (isWrite) {
+                store.put(key, payload);
+            } else {
+                store.get(key);
+            }
+            latencies[i] = System.nanoTime() - start;
+        }
+
+        long totalTimeNanos = System.nanoTime() - startTime;
+        double timeSecs = totalTimeNanos / 1_000_000_000.0;
+
+        double mbPerSec = ((double) ops * BYTES_PER_OP / (1024 * 1024)) / timeSecs;
+
+        java.util.Arrays.sort(latencies);
+        long p99Nanos = latencies[(int) (ops * 0.99)];
+
+        System.out.printf("%-12s : P99= %.3f micros/op; %6.1f MB/s\n", name, p99Nanos / 1000.0, mbPerSec);
     }
 
     private static void shuffleArray(ByteBuffer[] array) {
