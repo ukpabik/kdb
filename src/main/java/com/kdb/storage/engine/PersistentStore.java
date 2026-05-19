@@ -68,11 +68,11 @@ final class PersistentStore implements Store<ByteBuffer, byte[]>, Closeable {
 
     static final byte[] TOMBSTONE = new byte[0];
 
-    // 4 MB flush capacity
-    private static final int FLUSH_CAPACITY = 6_000_000;
+    // 64 MB flush capacity
+    private static final int FLUSH_CAPACITY = 64_000_000;
     private static final int COMPACTION_CAPACITY = 6;
 
-    // 30MB cache
+    // 320 MB cache
     private static final long CACHE_SIZE_LIMIT = FLUSH_CAPACITY * 5;
     private final Cache<ByteBuffer, byte[]> memCache;
 
