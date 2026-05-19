@@ -34,8 +34,8 @@ mvn exec:java
 * **Total Operations:** 1,000,000 unique records
 
 ### Throughput Results
-| Operation | Latency          | Throughput |
-| :--- |:-----------------|:-----------|
-| `fillrandom` | 3.290 micros/op  | 33.6 MB/s  |
-| `overwrite` | 3.249 micros/op  | 34.0 MB/s  |
-| `readrandom` | 17.059 micros/op | 6.5 MB/s   |
+| Operation | Latency         | Throughput |
+| :--- |:----------------|:-----------|
+| `fillrandom` | 3.978 micros/op | 27.8 MB/s  |
+| `overwrite` | 3.959 micros/op | 27.9 MB/s  |
+| `readrandom` | 3.555 micros/op | 31.1 MB/s  |
