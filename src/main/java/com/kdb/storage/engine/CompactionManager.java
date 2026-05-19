@@ -144,21 +144,7 @@ final class CompactionManager {
             fc.force(true);
             Files.move(compactionFile, newPath, StandardCopyOption.REPLACE_EXISTING);
             return new SSTable(newPath, indexMap, indexOffset, immutableTableList.getLast().sequenceNumber(), bloomFilter);
-        } finally {
-            closeIterators(iterators);
-        }
-
-    }
-
-    private void closeIterators(List<SSTableIterator> iterators) {
-        for (SSTableIterator it : iterators) {
-            try {
-                if (it != null) {
-                    it.close();
-                }
-            } catch (Exception e) {
-                System.err.println("Failed to close iterator: " + e.getMessage());
-            }
         }
     }
+
 }
