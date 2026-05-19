@@ -15,9 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 
-import static com.kdb.storage.common.FileSystemConstants.INDEX_BUFFER_LENGTH;
-import static com.kdb.storage.common.FileSystemConstants.INDEX_SEGMENT;
-import static com.kdb.storage.common.FileSystemConstants.MAGIC_NUMBER;
+import static com.kdb.storage.common.FileSystemConstants.*;
 import static com.kdb.storage.common.Serializer.serialize;
 import static java.nio.file.StandardOpenOption.*;
 
@@ -85,14 +83,17 @@ final class CompactionManager {
         estimatedKeys = Math.max(100_000, estimatedKeys);
         BloomFilter<byte[]> bloomFilter = BloomFilter.create(Funnels.byteArrayFunnel(), estimatedKeys, 0.01);
 
+        ByteBuffer pageBuf = ByteBuffer.allocate(PAGE_BUFFER_SIZE);
+        long currentOffset = 0;
+
         try (FileChannel fc = FileChannel.open(compactionFile, CREATE, APPEND)) {
             while (!pq.isEmpty()) {
                 MergeNode currentNode = pq.poll();
-                ByteBuffer key = currentNode.pair().key().duplicate();
-                ByteBuffer value = currentNode.pair().value().duplicate();
+                ByteBuffer key = currentNode.pair().key();
+                ByteBuffer value = currentNode.pair().value();
 
                 if (isFirstKey) {
-                    indexMap.put(key, fc.size());
+                    indexMap.put(key.duplicate(), currentOffset);
                     isFirstKey = false;
                 }
 
@@ -102,14 +103,27 @@ final class CompactionManager {
                     bloomFilter.put(keyBytesArr);
 
                     ByteBuffer serializedBytes = serialize(key.duplicate(), value.duplicate());
-                    counter++;
+                    int pairLength = serializedBytes.remaining();
 
                     if (counter == INDEX_SEGMENT) {
                         counter = 0;
-                        indexMap.put(currentNode.pair().key(), fc.size());
+                        indexMap.put(key.duplicate(), currentOffset);
                     }
+                    counter++;
 
-                    SafeReadWrite.writeFully(fc, serializedBytes);
+                    if (pageBuf.remaining() < pairLength) {
+                        pageBuf.flip();
+                        SafeReadWrite.writeFully(fc, pageBuf);
+                        pageBuf.clear();
+                        if (pairLength > pageBuf.capacity()) {
+                            SafeReadWrite.writeFully(fc, serializedBytes);
+                        } else {
+                            pageBuf.put(serializedBytes);
+                        }
+                    } else {
+                        pageBuf.put(serializedBytes);
+                    }
+                    currentOffset += pairLength;
                 }
 
                 if (currentNode.iterator().hasNext()) {
@@ -117,6 +131,11 @@ final class CompactionManager {
                 }
 
                 lastWrittenKey = key.duplicate();
+            }
+
+            if (pageBuf.position() > 0) {
+                pageBuf.flip();
+                SafeReadWrite.writeFully(fc, pageBuf);
             }
 
             long indexOffset = fc.size();
