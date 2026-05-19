@@ -76,12 +76,8 @@ final class CompactionManager {
         int counter = 0;
         Map<ByteBuffer, Long> indexMap = new TreeMap<>();
 
-        long estimatedKeys = 0;
-        for (SSTable table : immutableTableList) {
-            estimatedKeys += (table.indexOffset() / INDEX_BUFFER_LENGTH) * INDEX_SEGMENT;
-        }
-        estimatedKeys = Math.max(100_000, estimatedKeys);
-        BloomFilter<byte[]> bloomFilter = BloomFilter.create(Funnels.byteArrayFunnel(), estimatedKeys, 0.01);
+        long targetKeysPerTable = 1_000_000L;
+        BloomFilter<byte[]> bloomFilter = BloomFilter.create(Funnels.byteArrayFunnel(), targetKeysPerTable, 0.01);
 
         ByteBuffer pageBuf = ByteBuffer.allocate(PAGE_BUFFER_SIZE);
         long currentOffset = 0;
