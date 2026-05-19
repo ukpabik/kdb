@@ -6,6 +6,7 @@ import com.kdb.storage.exceptions.StorageException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -98,42 +99,40 @@ public final class WriteAheadLog implements AutoCloseable {
     public synchronized void replay(BiConsumer<ByteBuffer, byte[]> put, Consumer<ByteBuffer> remove) {
 
         try (FileChannel readChannel = FileChannel.open(filePath, StandardOpenOption.READ)) {
-            readChannel.position(0);
+            long fileSize = readChannel.size();
+            MappedByteBuffer walBuffer = readChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+
             // header == 5 bytes, opcode + keySize
             int headerSize = Byte.BYTES + Integer.BYTES;
-            ByteBuffer header = ByteBuffer.allocate(headerSize);
+            while (walBuffer.remaining() >= headerSize) {
+                walBuffer.mark();
 
-            while (readChannel.read(header) != -1) {
-                header.flip();
-                byte opCode = header.get();
-                int keySize = header.getInt();
+                byte opCode = walBuffer.get();
+                int keySize = walBuffer.getInt();
 
-                ByteBuffer keyBuffer = ByteBuffer.allocate(keySize);
-                while (keyBuffer.hasRemaining()) {
-                    readChannel.read(keyBuffer);
+                if (walBuffer.remaining() < keySize) {
+                    break;
                 }
-                keyBuffer.flip();
 
+                ByteBuffer keyBuffer = walBuffer.slice();
+                keyBuffer.limit(keySize);
+                walBuffer.position(walBuffer.position() + keySize);
                 if (opCode == OpCode.PUT.getCode()) {
-                    ByteBuffer valueSizeBuffer = ByteBuffer.allocate(Integer.BYTES);
-                    while (valueSizeBuffer.hasRemaining()) {
-                        readChannel.read(valueSizeBuffer);
+                    if (walBuffer.remaining() < Integer.BYTES) {
+                        break;
                     }
-                    valueSizeBuffer.flip();
-                    int valueSize = valueSizeBuffer.getInt();
+                    int valueSize = walBuffer.getInt();
 
-                    ByteBuffer valueBuffer = ByteBuffer.allocate(valueSize);
-                    while (valueBuffer.hasRemaining()) {
-                        readChannel.read(valueBuffer);
+                    if (walBuffer.remaining() < valueSize) {
+                        break;
                     }
 
-                    valueBuffer.flip();
-
-                    put.accept(keyBuffer, valueBuffer.array());
+                    byte[] valueBytes = new byte[valueSize];
+                    walBuffer.get(valueBytes);
+                    put.accept(keyBuffer, valueBytes);
                 } else {
                     remove.accept(keyBuffer);
                 }
-                header.clear();
             }
         } catch (NoSuchFileException _) {
            // Note: Should only occur on first boot. (log doesn't exist yet)

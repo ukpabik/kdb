@@ -28,13 +28,21 @@ class WriteAheadLogTest {
 
         try (WriteAheadLog recoveredWal = new WriteAheadLog(walPath)) {
             recoveredWal.replay(
-                    (key, value) -> replayedPuts.add(new String(key.array()) + "=" + new String(value)),
-                    (key) -> replayedRemoves.add(new String(key.array()))
+                    (key, value) -> {
+                        byte[] keyBytes = new byte[key.remaining()];
+                        key.duplicate().get(keyBytes);
+                        replayedPuts.add(new String(keyBytes) + "=" + new String(value));
+                    },
+                    (key) -> {
+                        byte[] keyBytes = new byte[key.remaining()];
+                        key.duplicate().get(keyBytes);
+                        replayedRemoves.add(new String(keyBytes));
+                    }
             );
         }
 
         assertEquals(1, replayedPuts.size(), "Should have replayed exactly one PUT");
-        assertEquals("user_1=kelechi", replayedPuts.get(0));
+        assertEquals("user_1=kelechi", replayedPuts.getFirst());
         assertTrue(replayedRemoves.isEmpty(), "Should not have replayed any REMOVEs");
     }
 
@@ -44,7 +52,7 @@ class WriteAheadLogTest {
 
         try (WriteAheadLog wal = new WriteAheadLog(walPath)) {
             wal.append(OpCode.PUT, ByteBuffer.wrap("key1".getBytes()), "val1".getBytes());
-            wal.append(OpCode.DELETE, ByteBuffer.wrap("key1".getBytes()), new byte[0]); // Value ignored on DELETE
+            wal.append(OpCode.DELETE, ByteBuffer.wrap("key1".getBytes()), new byte[0]);
             wal.append(OpCode.PUT, ByteBuffer.wrap("key2".getBytes()), "val2".getBytes());
         }
 
@@ -52,8 +60,16 @@ class WriteAheadLogTest {
 
         try (WriteAheadLog recoveredWal = new WriteAheadLog(walPath)) {
             recoveredWal.replay(
-                    (key, value) -> replayLog.add("PUT:" + new String(key.array()) + "=" + new String(value)),
-                    (key) -> replayLog.add("DEL:" + new String(key.array()))
+                    (key, value) -> {
+                        byte[] keyBytes = new byte[key.remaining()];
+                        key.duplicate().get(keyBytes);
+                        replayLog.add("PUT:" + new String(keyBytes) + "=" + new String(value));
+                    },
+                    (key) -> {
+                        byte[] keyBytes = new byte[key.remaining()];
+                        key.duplicate().get(keyBytes);
+                        replayLog.add("DEL:" + new String(keyBytes));
+                    }
             );
         }
 
