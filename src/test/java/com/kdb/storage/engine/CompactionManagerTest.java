@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
+import static com.kdb.storage.common.FileSystemConstants.TOMBSTONE;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CompactionManagerTest {
@@ -56,5 +57,44 @@ class CompactionManagerTest {
         Optional<byte[]> result = compactedManager.search(key1);
         assertTrue(result.isPresent());
         assertArrayEquals(newVal, result.get());
+    }
+
+    @Test
+    void testMajorCompactionTombstonePurging() throws IOException {
+        // Arrange keys
+        ByteBuffer deletedKey = ByteBuffer.wrap("user_to_delete".getBytes(StandardCharsets.UTF_8));
+        ByteBuffer livingKey = ByteBuffer.wrap("user_to_keep".getBytes(StandardCharsets.UTF_8));
+
+        byte[] activeVal = "keep_me@test.com".getBytes(StandardCharsets.UTF_8);
+        byte[] obsoleteVal = "delete_me_soon@test.com".getBytes(StandardCharsets.UTF_8);
+        Path sst1 = writer.writeToFile(ImmutableMap.of(
+                livingKey, activeVal,
+                deletedKey, obsoleteVal
+        ), 1L);
+
+        Path sst2 = writer.writeToFile(ImmutableMap.of(
+                deletedKey, TOMBSTONE
+        ), 2L);
+
+        manager.registerSSTable(sst1);
+        manager.registerSSTable(sst2);
+
+        List<SSTable> activeTables = manager.tables();
+        assertEquals(2, activeTables.size(), "Pre-compaction environment should manage exactly 2 SSTables.");
+
+        SSTable compactedTable = compactionManager.compact(activeTables);
+        manager.replaceCompactedTables(activeTables, compactedTable);
+
+        SSTableManager verificationManager = new SSTableManager(tempDir);
+
+        assertEquals(1, verificationManager.tables().size(), "Major compaction must flatten layout down to 1 file.");
+
+        Optional<byte[]> deletedResult = verificationManager.search(deletedKey);
+        assertFalse(deletedResult.isPresent(),
+                "The tombstone key should be permanently dropped from disk during a major compaction, returning empty.");
+
+        Optional<byte[]> livingResult = verificationManager.search(livingKey);
+        assertTrue(livingResult.isPresent(), "Living parallel records must survive compaction loops.");
+        assertArrayEquals(activeVal, livingResult.get(), "The preserved value should exactly match the living state data payload.");
     }
 }

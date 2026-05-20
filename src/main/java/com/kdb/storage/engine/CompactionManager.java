@@ -94,38 +94,44 @@ final class CompactionManager {
                 ByteBuffer key = currentNode.pair().key();
                 ByteBuffer value = currentNode.pair().value();
 
-                if (isFirstKey) {
-                    indexMap.put(key.duplicate(), currentOffset);
-                    isFirstKey = false;
-                }
-
                 if (!key.equals(lastWrittenKey)) {
-                    byte[] keyBytesArr = new byte[key.remaining()];
-                    key.duplicate().get(keyBytesArr);
-                    bloomFilter.put(keyBytesArr);
+                    boolean isTombstone = (value.remaining() == 0);
 
-                    ByteBuffer serializedBytes = serialize(key.duplicate(), value.duplicate());
-                    int pairLength = serializedBytes.remaining();
+                    if (isTombstone) {
+                        log.debug("Purging tombstone completely from disk for key {}", key.toString());
+                    } else {
+                        if (isFirstKey) {
+                            indexMap.put(key.duplicate(), currentOffset);
+                            isFirstKey = false;
+                        }
 
-                    if (counter == INDEX_SEGMENT) {
-                        counter = 0;
-                        indexMap.put(key.duplicate(), currentOffset);
-                    }
-                    counter++;
+                        byte[] keyBytesArr = new byte[key.remaining()];
+                        key.duplicate().get(keyBytesArr);
+                        bloomFilter.put(keyBytesArr);
 
-                    if (pageBuf.remaining() < pairLength) {
-                        pageBuf.flip();
-                        SafeReadWrite.writeFully(fc, pageBuf);
-                        pageBuf.clear();
-                        if (pairLength > pageBuf.capacity()) {
-                            SafeReadWrite.writeFully(fc, serializedBytes);
+                        ByteBuffer serializedBytes = serialize(key.duplicate(), value.duplicate());
+                        int pairLength = serializedBytes.remaining();
+
+                        if (counter == INDEX_SEGMENT) {
+                            counter = 0;
+                            indexMap.put(key.duplicate(), currentOffset);
+                        }
+                        counter++;
+
+                        if (pageBuf.remaining() < pairLength) {
+                            pageBuf.flip();
+                            SafeReadWrite.writeFully(fc, pageBuf);
+                            pageBuf.clear();
+                            if (pairLength > pageBuf.capacity()) {
+                                SafeReadWrite.writeFully(fc, serializedBytes);
+                            } else {
+                                pageBuf.put(serializedBytes);
+                            }
                         } else {
                             pageBuf.put(serializedBytes);
                         }
-                    } else {
-                        pageBuf.put(serializedBytes);
+                        currentOffset += pairLength;
                     }
-                    currentOffset += pairLength;
                 }
 
                 if (currentNode.iterator().hasNext()) {
